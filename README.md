@@ -1,4 +1,4 @@
-# QUIZINOX v2.5.0 — Offline + Online Quiz App (Android + Windows)
+# QUIZINOX v2.6.1 — Offline + Online Quiz App (Android + Windows)
 
 Local-first quiz maker/player built from the QUIZ-BOT engines. Works fully offline;
 AI features use the internet only when you start them.
@@ -90,6 +90,19 @@ The installer will be created in `release/QUIZINOX-Setup-2.4.0.exe`. For a no-in
 - Requires Python 3.9+, Git for Windows, internet access, and a PAT with repository and Actions access. A classic PAT with `repo` + `workflow` scopes is the simplest option; creating a new repository also requires permission to create repositories on the account.
 - Full instructions: `BUILD-WINDOWS-AUTOMATICALLY.md`.
 
+
+## Version 2.6.1
+
+- Saved AI answers and AI usage counters also moved to large storage (up to 600 saved AI answers instead of 160; they are no longer wiped when space runs low).
+- Desktop: "Quick actions" card lines up with "Recent quizzes".
+
+## Version 2.6.0 — Unlimited storage + phone screen fix
+
+- **No more "Storage full"**: quizzes, attempts, translations and revision lists are now saved in large on-device storage (IndexedDB) instead of the old ~5 MB browser area. It can use hundreds of MB or more — a share of the phone/PC free space. Old data moves over automatically the first time v2.6 opens. Nothing is trimmed automatically.
+- Settings → Data management shows how much is used and how much space is still available.
+- The app asks the system to keep its data safe (not auto-clear it when the device is low on space).
+- **Phone screen fix**: cards no longer run past the right edge of the screen. Wide tables (subject-wise, topic-wise) now slide sideways on their own — swipe the table, or tap the ‹ › buttons. The topic name column stays pinned while you slide.
+- Uninstalling the app or "Clear data" in Android settings still erases everything — keep exporting backups.
 
 ## Version 2.5.0 — Smart study update
 

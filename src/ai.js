@@ -1,3 +1,4 @@
+import * as Store from './storage.js';
 // QUIZINOX AI engine (v2.5)
 // Gemini FREE-tier aware client:
 //  • multiple API keys with automatic failover (one key fails → next key is used)
@@ -18,7 +19,7 @@ export const SAFETY = 0.8;
 const DEFAULT_LIMIT = { rpm: 5, rpd: 100, name: '' };
 const USAGE_KEY = 'quizinox_ai_usage_v2';
 const CACHE_KEY = 'quizinox_ai_cache_v1';
-const CACHE_MAX = 160;
+const CACHE_MAX = 600; // v2.6: saved in large storage, so many more AI answers can be kept
 const REQUEST_TIMEOUT = 90000;
 const MAX_WAIT_FOR_SLOT = 30000;
 
@@ -40,8 +41,8 @@ export function hash(str) {
 }
 
 /* ---------------- usage bookkeeping (separate small storage key) ---------------- */
-function loadUsage() { try { const u = JSON.parse(localStorage.getItem(USAGE_KEY) || '{}'); return u && typeof u === 'object' ? u : {}; } catch { return {}; } }
-function saveUsage(u) { try { localStorage.setItem(USAGE_KEY, JSON.stringify(u)); } catch { /* ignore */ } }
+function loadUsage() { try { const u = JSON.parse(Store.getItem(USAGE_KEY) || '{}'); return u && typeof u === 'object' ? u : {}; } catch { return {}; } }
+function saveUsage(u) { try { Store.setItem(USAGE_KEY, JSON.stringify(u)); } catch { /* ignore */ } }
 function slot(u, keyId, model) {
   const day = pacificDay();
   u[keyId] ||= {};
@@ -84,14 +85,14 @@ export function remainingToday(model) {
 }
 
 /* ---------------- response cache ---------------- */
-function loadCache() { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {}; } catch { return {}; } }
+function loadCache() { try { return JSON.parse(Store.getItem(CACHE_KEY) || '{}') || {}; } catch { return {}; } }
 export function cacheGet(key) { const c = loadCache(); return c[key]?.v ?? null; }
 export function cacheSet(key, v) {
   const c = loadCache(); c[key] = { v, t: Date.now() };
   const keys = Object.keys(c); if (keys.length > CACHE_MAX) keys.sort((a, b) => c[a].t - c[b].t).slice(0, keys.length - CACHE_MAX).forEach(k => delete c[k]);
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(c)); } catch { try { localStorage.removeItem(CACHE_KEY); } catch { /* */ } }
+  try { Store.setItem(CACHE_KEY, JSON.stringify(c)); } catch { /* keep the existing saved answers */ }
 }
-export function clearCache() { try { localStorage.removeItem(CACHE_KEY); } catch { /* */ } }
+export function clearCache() { try { Store.removeItem(CACHE_KEY); } catch { /* */ } }
 
 /* ---------------- helpers ---------------- */
 const sleep = (ms, signal) => new Promise((res, rej) => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# QUIZINOX v2.5 — GitHub uploader + automatic Android APK / Windows installer downloader
+# QUIZINOX v2.6 — GitHub uploader + automatic Android APK / Windows installer downloader
 #
 # Usage: keep this file inside (or next to) the QUIZINOX project folder and run:
 #     python upload_to_github.py
@@ -44,9 +44,9 @@ PROJECT_DIR = find_project_dir()
 def app_version():
     try:
         with open(os.path.join(PROJECT_DIR, "package.json"), encoding="utf-8") as f:
-            return json.load(f).get("version", "2.5.0")
+            return json.load(f).get("version", "2.6.1")
     except Exception:
-        return "2.5.0"
+        return "2.6.1"
 
 def api(method, path, token, **kwargs):
     headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}

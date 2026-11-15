@@ -2,6 +2,7 @@ import './style.css';
 import { fixQuestionsFile, convertFormat, parseText as parseMcqText } from './text-tools.js';
 import { saveFile, shareFile, onBackButton, isNative } from './native.js';
 import * as AI from './ai.js';
+import * as Store from './storage.js';
 const iconUrl = './quizinox-icon.png';
 // Keep the quiz/player startup bundle light. PDF engines and jsPDF are loaded
 // only when a user actually opens a PDF/export feature (important on low-RAM PCs).
@@ -34,7 +35,7 @@ function explanationLines(value) {
 }
 const L = i => String.fromCharCode(65 + i);
 const STORE = 'quizinox_local_v1', PLAY_STORE = 'quizinox_play_v1';
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.1';
 const defaultState = () => ({ quizzes: [], attempts: [], shuffleHistory: {}, bookmarks: {}, revision: {}, revStats: { mastered: 0 }, aiAnalysis: null, aiLog: {}, settings: { name: 'Learner', geminiKey: '', aiKeys: [], aiModel: AI.FALLBACK_CHAIN[0], aiAutoFallback: true, analystDaily: 5, tutorLang: 'English', langMode: 'single', langs: ['original'] }, activeTab: 'home' });
 let db = load();
 let currentQuiz = null, play = null, toastTimer = null, lastResult = null;
@@ -52,21 +53,21 @@ function normalizeState(d) {
   return s;
 }
 function load() {
-  try { return normalizeState(JSON.parse(localStorage.getItem(STORE) || '{}')); }
+  try { return normalizeState(JSON.parse(Store.getItem(STORE) || '{}')); }
   catch { return defaultState(); }
 }
+// v2.6: data lives in large on-device storage (IndexedDB) — no more 5 MB limit.
+// Nothing is trimmed automatically; if the phone/PC disk itself is full we only warn.
+let lastStoreWarn = 0;
+Store.onStorageEvents({ error: (e, key) => { if (key !== STORE) return; if (Date.now() - lastStoreWarn < 8000) return; lastStoreWarn = Date.now(); toast(Store.isQuotaError(e) ? 'Device storage is full — free some space on your phone/PC, then try again' : 'Could not save right now — please try again', 5000); } });
 function save() {
-  try { localStorage.setItem(STORE, JSON.stringify(db)); }
-  catch (e) {
-    // Storage full: drop the oldest attempt details and try again
-    if (db.attempts.length > 20) { db.attempts = db.attempts.slice(0, 20); try { localStorage.setItem(STORE, JSON.stringify(db)); toast('Storage was full — older attempts trimmed'); } catch { toast('Storage full. Export a backup and delete old quizzes.'); } }
-    else toast('Storage full. Export a backup and delete old quizzes.');
-  }
+  try { Store.setItem(STORE, JSON.stringify(db)); }
+  catch { toast('Could not save right now — please try again'); }
   updateCounts();
 }
 // Per-question time tracking (time while the app is in the background is not counted)
 function tickTime(p = play) { if (!p || p.finished) return; const now = Date.now(); if (p.qEnter && !p.away) { p.qTime ||= {}; p.qTime[p.index] = (p.qTime[p.index] || 0) + Math.min(now - p.qEnter, 30 * 60000); } p.qEnter = now; }
-function savePlay() { try { if (play && !play.finished) { tickTime(play); localStorage.setItem(PLAY_STORE, JSON.stringify({ ...play, interval: null })); } else localStorage.removeItem(PLAY_STORE); } catch { /* ignore */ } }
+function savePlay() { try { if (play && !play.finished) { tickTime(play); Store.setItem(PLAY_STORE, JSON.stringify({ ...play, interval: null })); } else Store.removeItem(PLAY_STORE); } catch { /* ignore */ } }
 function updateCounts() { const q = $('#quizCount'); if (q) q.textContent = db.quizzes.length; const r = $('#revCount'); if (r) { const n = dueItems().length; r.textContent = n; r.hidden = !n; } }
 function toast(msg, ms = 2800) { const el = $('#toast'); if (!el) return; el.textContent = msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), ms); }
 function question(text = '', options = ['', '', '', ''], correct = 0, explanation = '', topic = '') { return { id: uid(), text, options, correct: Number(correct) || 0, explanation, topic }; }
@@ -154,7 +155,7 @@ function render() { if (play) { renderPlayer(); return; } const tab = db.activeT
 /* ------------------------------ HOME ------------------------------ */
 function home() {
   const totalQ = db.quizzes.reduce((n, q) => n + q.questions.length, 0), avg = db.attempts.length ? Math.round(db.attempts.reduce((n, a) => n + a.percent, 0) / db.attempts.length) : 0;
-  const saved = (() => { try { return JSON.parse(localStorage.getItem(PLAY_STORE) || 'null'); } catch { return null; } })();
+  const saved = (() => { try { return JSON.parse(Store.getItem(PLAY_STORE) || 'null'); } catch { return null; } })();
   view.innerHTML = `
  ${saved && (saved.quiz?.isRevision || db.quizzes.some(q => q.id === saved.quiz?.id)) ? `<div class="resume-bar"><span>⏸ Unfinished attempt: <b>${esc(saved.quiz.title)}</b> · ${Object.keys(saved.answers || {}).length}/${saved.questions.length} answered · continue at Q${(saved.index || 0) + 1}${saved.lastAnswered != null ? ` (last answered Q${saved.lastAnswered + 1})` : ''}</span><div><button class="secondary" id="discardResume">Discard</button><button class="primary" id="resumeQuiz">Resume →</button></div></div>` : ''}
  ${(() => { const n = dueItems().length; return n ? `<div class="resume-bar revise-bar"><span>↻ <b>${n} question${n > 1 ? 's' : ''}</b> due for revision today (1 → 3 → 7 → 15 day cycle)</span><div><button class="primary" id="homeRevise">Revise now →</button></div></div>` : ''; })()}
@@ -164,7 +165,7 @@ function home() {
  <div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Recent quizzes</h3><p>Pick up where you left off</p></div><button class="textbtn" id="seeAll">View all →</button></div>${db.quizzes.length ? db.quizzes.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 4).map(quizRow).join('') : '<div class="empty-mini"><span>▤</span><b>No quizzes yet</b><small>Create your first quiz or import a file.</small></div>'}</div><div class="panel insight"><div class="panel-head"><div><h3>Quick actions</h3><p>Everything you need, one tap away</p></div><span class="spark">✦</span></div><button class="action-tile" id="actCreate"><span class="tileicon">＋</span><span><b>Build a quiz</b><small>Create questions manually</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actImport"><span class="tileicon bluebg">⇧</span><span><b>Import a file</b><small>TXT, JSON or PDF</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actPdf"><span class="tileicon amberbg">📄</span><span><b>Coaching PDF → TXT</b><small>SFG · Vajiram · VisionIAS · any PDF</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actReports"><span class="tileicon greenbg">▥</span><span><b>View performance</b><small>Accuracy, speed, subject & topic analysis</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actAi"><span class="tileicon">✦</span><span><b>AI Study Studio</b><small>Analyst · Ask AI tutor · question generator</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actSearch"><span class="tileicon bluebg">⌕</span><span><b>Search question bank</b><small>Find any question by keyword</small></span><span class="arrow">↗</span></button></div></div>
  <div class="footer-note">🔒 Private by design · No account · Works offline · AI optional</div>`;
   $('#heroCreate').onclick = () => setTab('create'); $('#heroImport').onclick = () => $('#fileInput').click(); $('#seeAll').onclick = () => setTab('quizzes'); $('#actCreate').onclick = () => setTab('create'); $('#actImport').onclick = () => $('#fileInput').click(); $('#actReports').onclick = () => setTab('reports'); $('#actPdf').onclick = () => openPdfStudio();
-  $('#resumeQuiz')?.addEventListener('click', resumeQuiz); $('#discardResume')?.addEventListener('click', () => { localStorage.removeItem(PLAY_STORE); home(); });
+  $('#resumeQuiz')?.addEventListener('click', resumeQuiz); $('#discardResume')?.addEventListener('click', () => { Store.removeItem(PLAY_STORE); home(); });
   $('#homeRevise')?.addEventListener('click', () => startRevision('due')); $('#actAi').onclick = () => setTab('ai'); $('#actSearch').onclick = () => setTab('search');
   wireQuizRows();
 }
@@ -284,7 +285,7 @@ function buildAttemptOrder(quiz, kind) {
   save();
   return candidate.qs;
 }
-function savedPlay() { try { return JSON.parse(localStorage.getItem(PLAY_STORE) || 'null'); } catch { return null; } }
+function savedPlay() { try { return JSON.parse(Store.getItem(PLAY_STORE) || 'null'); } catch { return null; } }
 function initialLangs(q) {
   const ok = c => c === 'original' || q.translations?.[c]?.length === q.questions.length;
   const want = (db.settings.langs || ['original']).filter(Boolean);
@@ -304,10 +305,10 @@ function resumeQuiz() {
     const s = savedPlay(); const q = s.quiz?.isRevision ? s.quiz : db.quizzes.find(x => x.id === s.quiz.id); if (!q) throw 0;
     play = { ...s, quiz: q, interval: null, qEnter: Date.now(), away: false, qTime: s.qTime || {}, langs: s.langs || ['original'], langMode: s.langMode || 'single' };
     enterPlayer(); toast(`Attempt resumed at Q${play.index + 1}`);
-  } catch { localStorage.removeItem(PLAY_STORE); toast('Could not resume that attempt'); }
+  } catch { Store.removeItem(PLAY_STORE); toast('Could not resume that attempt'); }
 }
 function enterPlayer() { document.body.classList.add('in-quiz'); markNav(''); renderPlayer(); scrollTop(); }
-function leavePlayer() { if (play) clearInterval(play.interval); play = null; localStorage.removeItem(PLAY_STORE); document.body.classList.remove('in-quiz'); }
+function leavePlayer() { if (play) clearInterval(play.interval); play = null; Store.removeItem(PLAY_STORE); document.body.classList.remove('in-quiz'); }
 const answeredCount = p => Object.keys(p.answers).filter(k => p.answers[k] != null).length;
 function qState(p, i) { const a = p.answers[i] != null, m = !!p.marked[i]; if (p.mode === 'practice' && a) return p.answers[i] === p.questions[i].correct ? 'right' : 'wrongq'; if (a && m) return 'ans-marked'; if (m) return 'marked'; if (a) return 'answered'; if (p.visited[i]) return 'skipped'; return 'fresh'; }
 const tMapCache = new WeakMap();
@@ -888,7 +889,7 @@ function openSuppliedTool(kind,q){
 
 /* ------------------------------ SETTINGS ------------------------------ */
 function settings() {
-  const used = (() => { try { return Math.round((localStorage.getItem(STORE) || '').length / 1024); } catch { return 0; } })();
+  const usedKB = Store.sizeKB(STORE), used = usedKB >= 1024 ? `${(usedKB / 1024).toFixed(1)} MB` : `${usedKB} KB`;
   const st = db.settings, model = st.aiModel || AI.FALLBACK_CHAIN[0];
   const langOpts = (sel, none) => `${none ? '<option value="">— none —</option>' : ''}<option value="original" ${sel === 'original' ? 'selected' : ''}>Original (as created)</option>${Object.entries(QUIZ_LANGS).map(([c, n]) => `<option value="${esc(c)}" ${c === sel ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
   view.innerHTML = `<div class="page-title"><div><div class="eyebrow">APP PREFERENCES</div><h1>Settings</h1><p>Personalize the app, manage AI keys and local data.</p></div></div><div class="settings-layout"><div class="panel"><h3>Profile</h3><label>Your display name<input id="userName" value="${esc(st.name || 'Learner')}"/></label><button class="primary" id="saveProfile">Save profile</button><div class="divider"></div>
@@ -906,7 +907,7 @@ function settings() {
   <h3>Question languages</h3><p class="muted">Default display for new attempts. Languages that aren't translated yet for a quiz can be added from 🌐 inside the quiz.</p>
   <div class="form-grid"><label>Display mode<select id="langModeSet"><option value="single" ${st.langMode !== 'multi' ? 'selected' : ''}>One language</option><option value="multi" ${st.langMode === 'multi' ? 'selected' : ''}>Bilingual / multilingual</option></select></label><label>Main language<select id="lang1Set">${langOpts(st.langs?.[0] || 'original')}</select></label><label>Second language<select id="lang2Set">${langOpts(st.langs?.[1] || '', true)}</select></label><label>Third language<select id="lang3Set">${langOpts(st.langs?.[2] || '', true)}</select></label></div><button class="secondary" id="saveLangs">Save language preference</button>
   <div class="divider"></div>
-  <h3>Data management</h3><p class="muted">Your quizzes and reports use about ${used} KB on this device. Export a backup before clearing app data.</p><button class="secondary" id="settingsBackup">⇩ Export backup</button><button class="textbtn" id="settingsRestore">Restore backup</button><button class="textbtn" id="clearAiCache">Clear saved AI answers</button><button class="textbtn danger-text" id="clearData">Delete all local data</button></div>
+  <h3>Data management</h3><p class="muted">Your quizzes and reports use about <b>${used}</b> on this device.</p><div class="storage-meter"><div class="storage-bar"><i id="storageBarFill" style="width:0%"></i></div><small id="storageInfo">${Store.engine() === 'indexeddb' ? 'Large storage active — no 5 MB limit. Checking free space…' : 'Basic storage (about 5 MB limit) — this device does not support large storage.'}</small></div><p class="muted">Export a backup regularly — uninstalling the app erases its data.</p><button class="secondary" id="settingsBackup">⇩ Export backup</button><button class="textbtn" id="settingsRestore">Restore backup</button><button class="textbtn" id="clearAiCache">Clear saved AI answers</button><button class="textbtn danger-text" id="clearData">Delete all local data</button></div>
   <div class="panel"><h3>About QUIZINOX</h3><img class="about-logo" src="${iconUrl}" alt="QUIZINOX"/><h2>QUIZINOX</h2><p class="muted">A private, offline-first quiz workspace.</p><div class="about-list"><span>✓ Works fully offline — quizzes, results, PDF tools, search, revision</span><span>✓ Smart navigation: swipe, keyboard shortcuts, jump, bookmarks, resume</span><span>✓ Detailed analytics: accuracy, speed, subject/topic, negative marking</span><span>✓ Automatic revision: 1 → 3 → 7 → 15 days</span><span>✓ Multi-language & bilingual question display</span><span>✓ AI analyst, Ask-AI tutor & UPSC question generator (optional, free Gemini keys)</span><span>✓ Coaching PDF converter: SFG · Vajiram · VisionIAS · PW · ForumIAS</span><span>✓ No account, no subscription</span></div><div class="notice">Uninstalling the app or clearing its data erases saved quizzes — keep a backup.</div><div class="version">Version ${APP_VERSION}</div></div></div>`;
   const renderKeys = () => {
     const keys = st.aiKeys || [], usage = Object.fromEntries(AI.usageSummary().map(u => [u.id, u]));
@@ -924,9 +925,10 @@ function settings() {
   $('#saveAi').onclick = () => { const custom = $('#aiCustomModel').value.trim(); st.aiModel = custom || $('#aiModel').value; st.aiAutoFallback = $('#aiFallback').checked; st.analystDaily = Number($('#analystDaily').value) || 5; st.tutorLang = $('#tutorLangSet').value; save(); toast('AI settings saved ✓'); settings(); };
   $('#saveLangs').onclick = () => { const picks = [...new Set([$('#lang1Set').value, $('#lang2Set').value, $('#lang3Set').value].filter(Boolean))]; st.langs = picks.length ? picks : ['original']; st.langMode = $('#langModeSet').value === 'multi' && picks.length > 1 ? 'multi' : 'single'; save(); toast('Language preference saved ✓'); };
   $('#saveProfile').onclick = () => { st.name = $('#userName').value.trim() || 'Learner'; $('#profileName').textContent = st.name; save(); toast('Profile updated'); };
+  Store.estimate().then(e => { const info = $('#storageInfo'), bar = $('#storageBarFill'); if (!e || !info || Store.engine() !== 'indexeddb') return; const free = Math.max(0, e.quotaMB - e.usedMB); const fmt = mb => mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`; bar.style.width = `${Math.min(100, Math.max(1, e.usedMB / e.quotaMB * 100)).toFixed(1)}%`; info.textContent = `Large storage active — no 5 MB limit · about ${fmt(free)} of space still available for quizzes`; });
   $('#settingsBackup').onclick = backup; $('#settingsRestore').onclick = () => $('#restoreInput').click();
   $('#clearAiCache').onclick = () => { AI.clearCache(); toast('Saved AI answers cleared'); };
-  $('#clearData').onclick = async () => { if (await confirmBox('Delete everything?', 'All quizzes, attempts, revision lists and settings on this device will be permanently deleted.', 'Delete all', true)) { localStorage.removeItem(STORE); localStorage.removeItem(PLAY_STORE); db = defaultState(); save(); $('#profileName').textContent = 'Learner'; setTab('home'); toast('Local data cleared'); } };
+  $('#clearData').onclick = async () => { if (await confirmBox('Delete everything?', 'All quizzes, attempts, revision lists and settings on this device will be permanently deleted.', 'Delete all', true)) { Store.removeItem(STORE); Store.removeItem(PLAY_STORE); db = defaultState(); save(); $('#profileName').textContent = 'Learner'; setTab('home'); toast('Local data cleared'); } };
 }
 
 /* =====================================================================
@@ -1257,6 +1259,30 @@ document.addEventListener('keydown', e => {
   }
   e.preventDefault();
 });
+
+/* ------------------------------ SIDEWAYS TABLES (v2.6) ------------------------------ */
+// Any wide table gets a "swipe sideways" hint with ‹ › buttons. Only the table moves —
+// the page itself never scrolls sideways.
+function setupWideTables(root = document) {
+  $$('.table-wrap', root).forEach(wrap => {
+    let hint = wrap.previousElementSibling;
+    if (!hint || !hint.classList.contains('swipe-hint')) {
+      hint = document.createElement('div'); hint.className = 'swipe-hint';
+      hint.innerHTML = '<span>⇠ <b>Swipe the table sideways</b> to see all columns ⇢</span><span class="sh-arrows"><button type="button" data-dir="-1" aria-label="Scroll table left">‹</button><button type="button" data-dir="1" aria-label="Scroll table right">›</button></span>';
+      wrap.before(hint);
+      $$('button', hint).forEach(b => b.onclick = () => wrap.scrollBy({ left: Number(b.dataset.dir) * Math.max(160, wrap.clientWidth * 0.7), behavior: 'smooth' }));
+      wrap.addEventListener('scroll', () => syncHint(wrap, hint), { passive: true });
+    }
+    syncHint(wrap, hint);
+  });
+}
+function syncHint(wrap, hint) {
+  const over = wrap.scrollWidth > wrap.clientWidth + 4; hint.classList.toggle('show', over);
+  const [l, r] = $$('button', hint); if (l) l.disabled = wrap.scrollLeft <= 2; if (r) r.disabled = wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 2;
+}
+let wideTimer = null;
+new MutationObserver(() => { clearTimeout(wideTimer); wideTimer = setTimeout(() => setupWideTables(), 60); }).observe(document.body, { childList: true, subtree: true });
+window.addEventListener('resize', () => { clearTimeout(wideTimer); wideTimer = setTimeout(() => setupWideTables(), 120); });
 
 /* ------------------------------ BACK BUTTON ------------------------------ */
 onBackButton(async exit => {

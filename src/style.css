@@ -257,3 +257,32 @@ mark{background:#f3bd6255;color:#fff;border-radius:3px;padding:0 2px}
 .title-actions select{width:auto}
 .two-col.even+.panel,.two-col.even+.two-col,.panel+.panel{margin-top:16px}
 .panel.trend+.two-col{margin-top:0}
+
+/* ===== QUIZINOX v2.6 — everything fits the phone screen; wide tables swipe sideways ===== */
+/* Grid children default to "as wide as their content", which pushed cards past the
+   right edge on phones. min-width:0 lets every card shrink to the screen width. */
+.two-col>*,.settings-layout>*,.editor-layout>*,.player-grid>*,.stats-grid>*,.quiz-grid>*,.tool-grid>*,.insight-grid>*,.neg-grid>*,.perf-grid>*,.artifact-grid>*,.ai-cards>*,.plan-grid>*{min-width:0}
+.two-col{grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr)}
+.two-col.even{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.panel,.stat-card,.quiz-card,.tool-card,.search-hit,.result-wrap,.player-wrap{min-width:0;max-width:100%}
+.action-tile>span:nth-child(2){flex:1;min-width:0}
+.content{min-width:0;max-width:100%}
+/* Wide tables: only the table slides left/right inside its card (finger swipe or trackpad). */
+.table-wrap{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;overscroll-behavior-x:contain;scroll-snap-type:none;max-width:100%;scrollbar-width:thin;scrollbar-color:#3a5888 transparent;padding-bottom:6px}
+.table-wrap::-webkit-scrollbar{height:5px}.table-wrap::-webkit-scrollbar-thumb{background:#3a5888;border-radius:6px}
+.table-wrap .stat-table{min-width:560px}
+.table-wrap .stat-table td:first-child{max-width:none;min-width:170px;white-space:normal;line-height:1.4}
+.table-wrap .stat-table th:first-child,.table-wrap .stat-table td:first-child{position:sticky;left:0;z-index:1;background:#111b2c;box-shadow:6px 0 8px -6px #000a}
+.swipe-hint{display:none;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:#8eafff;margin:2px 0 6px;letter-spacing:.3px}
+.swipe-hint b{font-weight:700}
+.swipe-hint.show{display:flex}
+.swipe-hint .sh-arrows{display:flex;gap:4px}
+.swipe-hint button{border:1px solid #34507c;background:#18294a;color:#a9c1f0;border-radius:8px;width:30px;height:26px;font-size:13px;padding:0}
+.swipe-hint button:disabled{opacity:.35}
+@media(max-width:760px){.two-col,.two-col.even,.editor-layout,.settings-layout{grid-template-columns:minmax(0,1fr)}}
+.storage-meter{display:grid;gap:6px;margin:4px 0 8px}
+.storage-bar{height:8px;border-radius:6px;background:#1c2a3e;overflow:hidden}
+.storage-bar i{display:block;height:100%;background:linear-gradient(90deg,#51d6a0,#5b8cff);border-radius:6px;transition:width .4s}
+.storage-meter small{font-size:10.5px;color:#7fdcb5;line-height:1.5}
+@media(max-width:760px){.table-wrap .stat-table td:first-child,.table-wrap .stat-table th:first-child{min-width:130px;max-width:150px;width:150px;font-size:10.5px}}
+.two-col>.panel+.panel{margin-top:0}
