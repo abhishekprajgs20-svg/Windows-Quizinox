@@ -9,7 +9,7 @@ This method does not require Node.js on your laptop and does not require a GitHu
 3. Select **Build QUIZINOX Windows Installer** from the left side.
 4. Click **Run workflow** and wait for the green check mark.
 5. Open the completed workflow run and download the artifact named **QUIZINOX-Windows-Installer**.
-6. Extract the downloaded artifact ZIP and double-click `QUIZINOX-Setup-2.4.0.exe`.
+6. Extract the downloaded artifact ZIP and double-click `QUIZINOX-Setup-2.5.0.exe`.
 7. Follow the installer. A Desktop shortcut and Start Menu entry are created.
 
 ## Build directly on your Windows laptop
@@ -17,7 +17,7 @@ This method does not require Node.js on your laptop and does not require a GitHu
 1. Install Node.js 22 LTS from https://nodejs.org/.
 2. Extract this project ZIP.
 3. Open the `QUIZINOX` folder and double-click `BUILD-WINDOWS.bat`.
-4. After the build completes, open `release` and run `QUIZINOX-Setup-2.4.0.exe`.
+4. After the build completes, open `release` and run `QUIZINOX-Setup-2.5.0.exe`.
 
 ## Portable build (no installation)
 
@@ -28,7 +28,7 @@ npm install
 npm run desktop:portable
 ```
 
-Run the generated `QUIZINOX-Portable-2.4.0.exe` from the `release` folder.
+Run the generated `QUIZINOX-Portable-2.5.0.exe` from the `release` folder.
 
 ## Important
 

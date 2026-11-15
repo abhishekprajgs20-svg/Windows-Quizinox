@@ -1,4 +1,4 @@
-# QUIZINOX v2.4.0 — Offline + Online Quiz App (Android + Windows)
+# QUIZINOX v2.5.0 — Offline + Online Quiz App (Android + Windows)
 
 Local-first quiz maker/player built from the QUIZ-BOT engines. Works fully offline;
 AI features use the internet only when you start them.
@@ -89,3 +89,38 @@ The installer will be created in `release/QUIZINOX-Setup-2.4.0.exe`. For a no-in
 - The script creates/reuses a GitHub repository, pushes the source, waits for the Windows GitHub Actions build, downloads the installer, and creates `QUIZINOX_v2.4_Windows_Complete.zip` in the parent folder with the `.exe` inside `release/`.
 - Requires Python 3.9+, Git for Windows, internet access, and a PAT with repository and Actions access. A classic PAT with `repo` + `workflow` scopes is the simplest option; creating a new repository also requires permission to create repositories on the account.
 - Full instructions: `BUILD-WINDOWS-AUTOMATICALLY.md`.
+
+
+## Version 2.5.0 — Smart study update
+
+### 1. Smart question navigation
+- **Swipe** left / right on the question card (phone) to go to the next / previous question.
+- **Keyboard shortcuts** (Windows): ← → move · Enter/Space next · 1–8 or A–E choose option · X clear · M mark for review · F bookmark difficult · G jump to number · U next unanswered · Home/End first/last · T palette · L language · I ask AI · S submit · Esc exit · ? help (⌨ button in the quiz).
+- **Jump** to any question: palette numbers, "Go to Q#" box, "Next blank" button or the G key.
+- **Bookmark difficult questions** (⚐) while playing, in results, revision and search.
+- **Resume** an unfinished quiz from the exact question you left (Home banner or Play → "Resume from Q…").
+
+### 2. Detailed performance analytics
+- Per attempt: accuracy %, correct / incorrect / skipped, average time per question, fastest & slowest questions, topic-wise table, full negative-marking calculation (and a "with −⅓" comparison when the quiz has no negative marking).
+- Analytics page: overall accuracy, avg time (correct vs wrong), rushed mistakes, subject-wise and topic-wise tables, fastest/slowest questions, negative-marking calculator.
+- Add a **Topic** to each question in the quiz editor (AI-generated questions get topics automatically).
+
+### 3. Automatic revision system
+- Wrong answers enter the revision list automatically. Bookmarked difficult questions are also saved separately.
+- Each question returns after **1, 3, 7 and 15 days**. Correct on time → next step; wrong → back to Day 1; it leaves revision only after a correct recall at the 15-day step ("mastered").
+
+### 4. Question search
+- Search all quizzes by keyword or "exact phrase" — question, options, explanation, topic, and translated versions. Turn the results into a practice quiz.
+
+### 5. Multi-language mode
+- In a quiz tap 🌐: show **one language** (e.g. only Hindi) or **bilingual / multilingual** (2–3 languages together, e.g. Original + Hindi). One tap switches back to one language. Default preference in Settings.
+
+### 6. AI (optional, online, free Gemini keys)
+- **AI Personal Study Analyst**: runs only when you tap "Analyse with AI" (1 request). Weak subjects, repeated mistakes, accuracy & speed insights and a 7-day plan. Offline insights are always shown without AI. Daily run limit is configurable (default 5/day).
+- **Ask AI – Question Tutor**: why the answer is correct, why the others are wrong, simple explanation, what else to read for UPSC, 2 similar MCQs, or your own doubt. Answers are cached on the device so repeating a question costs nothing. "Add to explanation" saves the AI note into the quiz.
+- **AI Question Generator**: from a topic, PDF/TXT, pasted notes or your weak topics. Types: standard MCQ, statement-based, match the following, assertion–reason, multiple correct answers, pairs, chronology. Choose difficulty, exam style, language (English / Hindi / bilingual), explanation depth, preview & select before saving, add to an existing quiz, stop anytime and keep partial results. Long PDFs are split into parts so each request stays small.
+- **Multiple API keys with automatic failover**: add any number of Gemini keys in Settings → AI keys (or paste many at once). If a key is invalid, rate-limited or out of daily quota, the next key is used automatically. If every key is busy on one model, QUIZINOX falls back to another free model (2.5 Flash → 2.5 Flash-Lite → 2.0 Flash → 2.0 Flash-Lite).
+- **Free-tier guard**: requests are paced per key and per model at 80% of Google's published free limits; daily limits reset at midnight Pacific time. Keys from the *same* Google Cloud project share one quota — use keys from different accounts/projects for more capacity. Keys are never included in backups.
+
+### Uploader
+`python upload_to_github.py` now asks whether to build the **Android APK, the Windows installer or both**, uploads the code, starts the GitHub Actions builds and downloads `QUIZINOX.apk` and/or `QUIZINOX-Setup-2.5.0.exe` next to the script. The token needs `repo` and `workflow` scopes.
