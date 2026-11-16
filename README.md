@@ -138,18 +138,17 @@ The installer will be created in `release/QUIZINOX-Setup-2.4.0.exe`. For a no-in
 ### Uploader
 `python upload_to_github.py` now asks whether to build the **Android APK, the Windows installer or both**, uploads the code, starts the GitHub Actions builds and downloads `QUIZINOX.apk` and/or `QUIZINOX-Setup-2.5.0.exe` next to the script. The token needs `repo` and `workflow` scopes.
 
----
+## v2.7.0 — multi-provider AI and mobile settings repair
 
-## v2.7.0 — what changed
+- Mobile Settings: responsive provider/key controls to prevent the AI key section from forcing the settings page wider than the phone viewport.
+- AI API providers: Google Gemini, Groq, OpenRouter, OpenAI, Anthropic Claude, and Hugging Face. Add a key by selecting its provider in Settings → AI providers.
+- Provider model lists are curated starting choices; use the custom model ID field when a provider offers a model not listed. Availability and free-tier eligibility are controlled by the provider and can change.
+- AI requests attempt enabled non-Gemini providers and then use the existing Gemini quota-aware model/key fallback. Invalid provider keys are marked after authentication failures.
+- Question generator adds case/situation, map/location, data/table interpretation, conceptual/analytical, pair-of-statements, fill-in-the-blank, and odd-one-out question styles; Select all / Clear selection controls are included.
+- Added additional exam styles including CDS/CAPF, NDA, State PCS variants, Judiciary, UGC NET, CTET/TET, Police/SI, Agniveer, CUET, NEET, JEE, and university exams.
 
-**1. Settings screen on phones (fixed).** After adding an API key the Settings card used to stretch past the screen edge. The key list/rows, add-key form and option grids now shrink and wrap to the screen width (see the "v2.7" block at the end of `src/style.css`).
+### Important provider and sign-in notes
 
-**2. Many AI providers, free keys welcome.** Settings → AI providers now supports Google Gemini (**free or paid keys**, every Gemini model + "Load all models from my key"), Groq, OpenRouter (free `:free` models), Mistral, Cerebras, Hugging Face, OpenAI (GPT), Claude (Anthropic), DeepSeek and any OpenAI-compatible endpoint (Ollama, LM Studio, Together…).
-- Several keys per provider; a failing key → next key → next model of the same provider → next provider (cross-provider failover continues the *same* job, e.g. the remaining batches of a 50-question generation).
-- Fallback order can be changed with ▲ ▼; each provider can be switched off.
-- "Free-tier guard" (stays below 80 % of published free limits) can be turned off if Google changes its free quotas; paid Gemini keys skip it automatically.
-- Pasting a key auto-detects its provider (AIza…, gsk_…, sk-or-…, sk-ant-…, hf_…).
+This version uses provider API keys. Gemini API keys created through Google AI Studio work with eligible free-tier access; Gemini Advanced/Google One subscription status is not itself an API credential. OpenRouter and Groq offer selected free models subject to their current limits. Hugging Face access depends on model/provider availability and account limits. OpenAI and Anthropic API usage generally requires billing/credits; a ChatGPT or Claude consumer subscription does not automatically include API usage.
 
-**3. Login without an API key (experimental).** "Login instead of an API key" uses **Puter** (free account → GPT / Claude / Gemini / DeepSeek models). Mode selector: *Auto* (login first, API keys as backup) · *API keys only* · *Login only*. Direct login with a personal Gemini / ChatGPT / Claude / Arena account is not offered by those companies, so it is not possible for any app.
-
-**4. AI quiz generator.** 18 more question types (Statement I & II, Incorrect/NOT, EXCEPT, How-many, Odd-one-out, True/False, Fill-in-the-blank, Cause & effect, Passage, Numerical, Logical reasoning, Analogy, Vocabulary/Grammar, Current affairs, Geography/Location, Case study) — all old types kept. **Select all / Clear / UPSC set** buttons for types, **Select all / Deselect all** for generated questions, and ~60 exams (UPSC, RAS/RPSC and other state PSCs, SSC, Banking, Railways, JEE, NEET, CUET, CAT, GATE, CLAT, NET, TET…) plus "Other exam (type your own)".
+Direct consumer-account sign-in to ChatGPT, Gemini web chat, Claude web chat, or Arena is not included: those services do not expose a supported general-purpose login-to-chat API for third-party quiz apps. No passwords or consumer session cookies should be collected. Puter.js account-based access is also not enabled in this release. Provider keys are stored locally by the app; use your own keys and review each provider's terms and billing settings.

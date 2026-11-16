@@ -1,73 +1,34 @@
 import * as Store from './storage.js';
-// QUIZINOX AI engine (v2.7) — multi-provider
-//  • Providers: Google Gemini (free OR paid keys), Groq, OpenRouter (free models), OpenAI, Claude (Anthropic),
-//    Mistral, Cerebras, Hugging Face, DeepSeek, any OpenAI-compatible endpoint, plus Puter (account login, no key).
-//  • Several keys per provider: when one key fails the next key is used automatically.
-//  • When every key/model of one provider fails, the SAME request moves on to the next provider
-//    (so a long job such as "generate 50 questions" simply continues on another AI).
-//  • Per-key / per-model pacing that stays below the published free limits (can be switched off).
-//  • Small local response cache so repeated questions never spend quota again.
+// QUIZINOX AI engine (v2.5)
+// Gemini FREE-tier aware client:
+//  • multiple API keys with automatic failover (one key fails → next key is used)
+//  • per-key / per-model pacing that stays below Google's free limits (80% safety margin)
+//  • automatic model fallback when a model is busy, missing or out of free quota
+//  • small local response cache so repeated questions never spend quota again
 // Nothing here runs unless the user taps an AI button.
 
-/* ---------------- provider catalogue ---------------- */
-export const GEMINI_MODELS = {
-  'gemini-3-pro-preview': { rpm: 5, rpd: 50, name: 'Gemini 3 Pro (preview)', note: 'Newest & smartest — free quota may be 0 on free keys' },
-  'gemini-3-flash-preview': { rpm: 10, rpd: 250, name: 'Gemini 3 Flash (preview)', note: 'Newest fast model' },
-  'gemini-2.5-pro': { rpm: 5, rpd: 100, name: 'Gemini 2.5 Pro', note: 'Smart, small free quota' },
+export const MODELS = {
   'gemini-2.5-flash': { rpm: 10, rpd: 250, name: 'Gemini 2.5 Flash', note: 'Best balance (recommended)' },
   'gemini-2.5-flash-lite': { rpm: 15, rpd: 1000, name: 'Gemini 2.5 Flash-Lite', note: 'Highest free daily quota' },
   'gemini-2.0-flash': { rpm: 15, rpd: 200, name: 'Gemini 2.0 Flash', note: 'Older, fast' },
   'gemini-2.0-flash-lite': { rpm: 30, rpd: 200, name: 'Gemini 2.0 Flash-Lite', note: 'Older, very fast' },
-  'gemini-flash-latest': { rpm: 10, rpd: 250, name: 'Gemini Flash (latest alias)', note: 'Always the newest Flash' },
-  'gemini-flash-lite-latest': { rpm: 15, rpd: 1000, name: 'Gemini Flash-Lite (latest alias)', note: 'Always the newest Flash-Lite' },
-  'gemma-3-27b-it': { rpm: 30, rpd: 14400, name: 'Gemma 3 27B', note: 'Open model, big free quota (plain text)' },
+  'gemini-2.5-pro': { rpm: 5, rpd: 100, name: 'Gemini 2.5 Pro', note: 'Smartest, very small free quota' },
 };
-const m = (name, note = '') => ({ name, note });
-export const PROVIDERS = {
-  gemini: { name: 'Google Gemini', kind: 'gemini', free: 'Free tier + paid', keyUrl: 'aistudio.google.com/apikey', prefix: /^AIza/, default: 'gemini-2.5-flash', chain: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'], models: GEMINI_MODELS },
-  groq: { name: 'Groq', kind: 'openai', base: 'https://api.groq.com/openai/v1', json: true, rpm: 25, free: 'Free tier', keyUrl: 'console.groq.com/keys', prefix: /^gsk_/, default: 'llama-3.3-70b-versatile', chain: ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'],
-    models: { 'llama-3.3-70b-versatile': m('Llama 3.3 70B', 'Smart & fast'), 'openai/gpt-oss-120b': m('GPT-OSS 120B', 'Strong open model'), 'openai/gpt-oss-20b': m('GPT-OSS 20B', 'Fast'), 'meta-llama/llama-4-scout-17b-16e-instruct': m('Llama 4 Scout 17B'), 'qwen/qwen3-32b': m('Qwen 3 32B'), 'moonshotai/kimi-k2-instruct': m('Kimi K2'), 'llama-3.1-8b-instant': m('Llama 3.1 8B', 'Very fast, small') } },
-  openrouter: { name: 'OpenRouter (free models)', kind: 'openai', base: 'https://openrouter.ai/api/v1', rpm: 15, free: 'Free models (":free")', keyUrl: 'openrouter.ai/keys', prefix: /^sk-or-/, default: 'meta-llama/llama-3.3-70b-instruct:free', chain: ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-3-27b-it:free', 'openai/gpt-oss-20b:free', 'mistralai/mistral-small-3.2-24b-instruct:free'],
-    models: { 'meta-llama/llama-3.3-70b-instruct:free': m('Llama 3.3 70B (free)'), 'google/gemma-3-27b-it:free': m('Gemma 3 27B (free)'), 'openai/gpt-oss-20b:free': m('GPT-OSS 20B (free)'), 'openai/gpt-oss-120b:free': m('GPT-OSS 120B (free)'), 'deepseek/deepseek-r1-0528:free': m('DeepSeek R1 (free)'), 'qwen/qwen3-235b-a22b:free': m('Qwen3 235B (free)'), 'mistralai/mistral-small-3.2-24b-instruct:free': m('Mistral Small 3.2 (free)') } },
-  mistral: { name: 'Mistral', kind: 'openai', base: 'https://api.mistral.ai/v1', json: true, rpm: 30, free: 'Free "Experiment" plan', keyUrl: 'console.mistral.ai/api-keys', default: 'mistral-small-latest', chain: ['mistral-small-latest', 'open-mistral-nemo'],
-    models: { 'mistral-small-latest': m('Mistral Small'), 'mistral-medium-latest': m('Mistral Medium'), 'mistral-large-latest': m('Mistral Large'), 'open-mistral-nemo': m('Mistral Nemo'), 'ministral-8b-latest': m('Ministral 8B') } },
-  cerebras: { name: 'Cerebras', kind: 'openai', base: 'https://api.cerebras.ai/v1', json: true, rpm: 25, free: 'Free tier', keyUrl: 'cloud.cerebras.ai', prefix: /^csk-/, default: 'llama-3.3-70b', chain: ['llama-3.3-70b', 'gpt-oss-120b', 'llama3.1-8b'],
-    models: { 'llama-3.3-70b': m('Llama 3.3 70B'), 'gpt-oss-120b': m('GPT-OSS 120B'), 'qwen-3-32b': m('Qwen 3 32B'), 'llama3.1-8b': m('Llama 3.1 8B') } },
-  huggingface: { name: 'Hugging Face', kind: 'openai', base: 'https://router.huggingface.co/v1', rpm: 15, free: 'Free monthly credits', keyUrl: 'huggingface.co/settings/tokens', prefix: /^hf_/, default: 'meta-llama/Llama-3.3-70B-Instruct', chain: ['meta-llama/Llama-3.3-70B-Instruct', 'Qwen/Qwen2.5-72B-Instruct'],
-    models: { 'meta-llama/Llama-3.3-70B-Instruct': m('Llama 3.3 70B'), 'Qwen/Qwen2.5-72B-Instruct': m('Qwen 2.5 72B'), 'openai/gpt-oss-120b': m('GPT-OSS 120B'), 'deepseek-ai/DeepSeek-V3': m('DeepSeek V3') } },
-  openai: { name: 'OpenAI (GPT)', kind: 'openai', base: 'https://api.openai.com/v1', json: true, free: 'Paid (no free API tier)', keyUrl: 'platform.openai.com/api-keys', prefix: /^sk-(proj-)?[A-Za-z0-9_-]{30,}$/, default: 'gpt-4o-mini', chain: ['gpt-4o-mini'],
-    models: { 'gpt-4o-mini': m('GPT-4o mini', 'Cheap & fast'), 'gpt-4o': m('GPT-4o'), 'gpt-4.1-mini': m('GPT-4.1 mini'), 'gpt-4.1': m('GPT-4.1'), 'gpt-5-mini': m('GPT-5 mini'), 'gpt-5': m('GPT-5') } },
-  anthropic: { name: 'Claude (Anthropic)', kind: 'anthropic', free: 'Paid (no free API tier)', keyUrl: 'console.anthropic.com/settings/keys', prefix: /^sk-ant-/, default: 'claude-haiku-4-5', chain: ['claude-haiku-4-5'],
-    models: { 'claude-haiku-4-5': m('Claude Haiku 4.5', 'Fast & cheap'), 'claude-sonnet-4-5': m('Claude Sonnet 4.5', 'Smart'), 'claude-opus-4-1': m('Claude Opus 4.1', 'Most capable') } },
-  deepseek: { name: 'DeepSeek', kind: 'openai', base: 'https://api.deepseek.com/v1', json: true, free: 'Very cheap (no free tier)', keyUrl: 'platform.deepseek.com/api_keys', default: 'deepseek-chat', chain: ['deepseek-chat'],
-    models: { 'deepseek-chat': m('DeepSeek V3 (chat)'), 'deepseek-reasoner': m('DeepSeek R1 (reasoner)') } },
-  custom: { name: 'Custom (OpenAI-compatible)', kind: 'openai', base: '', free: 'Any OpenAI-style endpoint (Ollama, LM Studio, Together…)', keyUrl: '', default: '', chain: [], models: {} },
-};
-export const PUTER_MODELS = { '': 'Puter default', 'gpt-4o-mini': 'GPT-4o mini', 'gpt-4o': 'GPT-4o', 'gpt-5-nano': 'GPT-5 nano', 'gpt-5-mini': 'GPT-5 mini', 'claude-sonnet-4-5': 'Claude Sonnet 4.5', 'gemini-2.5-flash': 'Gemini 2.5 Flash', 'deepseek-chat': 'DeepSeek chat' };
-export const DEFAULT_ORDER = ['gemini', 'groq', 'openrouter', 'mistral', 'cerebras', 'huggingface', 'openai', 'anthropic', 'deepseek', 'custom'];
-
-// ---- backwards-compatible names used by older code ----
-export const MODELS = GEMINI_MODELS;
-export const FALLBACK_CHAIN = PROVIDERS.gemini.chain;
+export const FALLBACK_CHAIN = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 export const SAFETY = 0.8;
-const DEFAULT_LIMIT = { rpm: 20, rpd: Infinity, name: '' };
+const DEFAULT_LIMIT = { rpm: 5, rpd: 100, name: '' };
 const USAGE_KEY = 'quizinox_ai_usage_v2';
 const CACHE_KEY = 'quizinox_ai_cache_v1';
-const CACHE_MAX = 600;
+const CACHE_MAX = 600; // v2.6: saved in large storage, so many more AI answers can be kept
 const REQUEST_TIMEOUT = 90000;
 const MAX_WAIT_FOR_SLOT = 30000;
-const MAX_ROUTES = 60;
 
 let ctx = { getSettings: () => ({}), saveSettings: () => {} };
 export function initAI(c) { ctx = { ...ctx, ...c }; }
+
 export class AIError extends Error { constructor(message, code = 'error') { super(message); this.code = code; } }
 
-export const providerOf = k => (k && PROVIDERS[k.provider] ? k.provider : 'gemini');
-export const providerName = p => (p === 'puter' ? 'Puter login' : PROVIDERS[p]?.name || p);
-export function limitsFor(model, provider = 'gemini') {
-  const P = PROVIDERS[provider] || PROVIDERS.gemini;
-  return { ...DEFAULT_LIMIT, rpm: P.rpm || DEFAULT_LIMIT.rpm, name: model, ...(P.models?.[model] || {}) };
-}
+export const limitsFor = m => ({ ...DEFAULT_LIMIT, name: m, ...(MODELS[m] || {}) });
 export const safeCap = n => Math.max(1, Math.floor(n * SAFETY));
 export function pacificDay(d = new Date()) {
   try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
@@ -78,41 +39,6 @@ export function hash(str) {
   for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ c, 3266489917); }
   return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
 }
-/** Guess the provider from the shape of a pasted key. */
-export function detectProvider(key, fallback = 'gemini') {
-  const k = String(key || '').trim();
-  for (const id of ['anthropic', 'openrouter', 'groq', 'cerebras', 'huggingface', 'gemini']) if (PROVIDERS[id].prefix?.test(k)) return id;
-  if (PROVIDERS.openai.prefix.test(k)) return 'openai';
-  return fallback;
-}
-
-/* ---------------- settings helpers ---------------- */
-const S = () => ctx.getSettings() || {};
-export function selectedModel(p) {
-  const s = S(); const P = PROVIDERS[p]; if (!P) return '';
-  if (p === 'gemini') return s.aiModels?.gemini || s.aiModel || P.default;
-  return s.aiModels?.[p] || P.default;
-}
-export const primaryProvider = () => (PROVIDERS[S().aiPrimary] ? S().aiPrimary : 'gemini');
-export function providerOrder() {
-  const o = (Array.isArray(S().aiOrder) ? S().aiOrder : []).filter(p => PROVIDERS[p]);
-  for (const p of DEFAULT_ORDER) if (!o.includes(p)) o.push(p);
-  return o;
-}
-export const providerEnabled = p => S().aiDisabled?.[p] !== true;
-export function getKeys() { return (S().aiKeys || []).filter(k => k && k.key); }
-export const keysOf = p => getKeys().filter(k => providerOf(k) === p);
-const usable = k => k.enabled !== false && k.status !== 'invalid';
-function updateKey(id, patch) { const k = (S().aiKeys || []).find(x => x.id === id); if (k) { Object.assign(k, patch); ctx.saveSettings(); } }
-export const puterLinked = () => !!S().puterLinked;
-/** True when at least one way of reaching an AI exists (a usable key or a linked login). */
-export function aiReady() {
-  const mode = S().aiMode || 'auto';
-  const keysOk = mode !== 'login' && getKeys().some(k => usable(k) && providerEnabled(providerOf(k)));
-  const loginOk = mode !== 'api' && puterLinked();
-  return keysOk || loginOk;
-}
-export function modelLabel(provider, model) { return PROVIDERS[provider]?.models?.[model]?.name || (provider === 'puter' ? (PUTER_MODELS[model] || model || 'Puter AI') : model); }
 
 /* ---------------- usage bookkeeping (separate small storage key) ---------------- */
 function loadUsage() { try { const u = JSON.parse(Store.getItem(USAGE_KEY) || '{}'); return u && typeof u === 'object' ? u : {}; } catch { return {}; } }
@@ -129,20 +55,17 @@ function patchSlot(keyId, model, fn) { const u = loadUsage(); fn(slot(u, keyId, 
 export function resetUsageFlags() { const u = loadUsage(); for (const k of Object.values(u)) for (const s of Object.values(k)) { s.cooldownUntil = 0; s.dayBlocked = ''; } saveUsage(u); }
 export function forgetKeyUsage(keyId) { const u = loadUsage(); delete u[keyId]; saveUsage(u); }
 
-/** Local pacing caps for one key on one model. Paid Gemini keys and "guard off" skip the free-tier caps. */
-function capsFor(k, model) {
-  if (S().aiGuard === false) return { rpm: Infinity, rpd: Infinity };
-  if (k.tier === 'paid') return { rpm: 120, rpd: Infinity };
-  const L = limitsFor(model, providerOf(k));
-  return { rpm: safeCap(L.rpm), rpd: L.rpd === Infinity ? Infinity : safeCap(L.rpd) };
-}
+export function getAllKeys() { return (ctx.getSettings().aiKeys || []).filter(k => k && k.key); }
+export function getKeys() { return getAllKeys().filter(k => !k.provider || k.provider === 'gemini'); }
+function updateKey(id, patch) { const k = (ctx.getSettings().aiKeys || []).find(x => x.id === id); if (k) { Object.assign(k, patch); ctx.saveSettings(); } }
+
 export function keyAvailability(k, model) {
-  const u = loadUsage(); const s = slot(u, k.id, model); const C = capsFor(k, model); const now = Date.now();
+  const u = loadUsage(); const s = slot(u, k.id, model); const L = limitsFor(model); const now = Date.now();
   if (k.enabled === false) return { ok: false, reason: 'disabled', used: s.count };
   if (k.status === 'invalid') return { ok: false, reason: 'invalid', used: s.count };
-  if (s.dayBlocked === pacificDay() || s.count >= C.rpd) return { ok: false, reason: 'daily', used: s.count };
+  if (s.dayBlocked === pacificDay() || s.count >= safeCap(L.rpd)) return { ok: false, reason: 'daily', used: s.count };
   if (s.cooldownUntil > now) return { ok: false, reason: 'cooldown', wait: s.cooldownUntil - now, used: s.count };
-  if (s.recent.length >= C.rpm) return { ok: false, reason: 'minute', wait: s.recent[0] + 60000 - now + 300, used: s.count };
+  if (s.recent.length >= safeCap(L.rpm)) return { ok: false, reason: 'minute', wait: s.recent[0] + 60000 - now + 300, used: s.count };
   return { ok: true, used: s.count };
 }
 /** Per key: today's request count per model, for the Settings screen. */
@@ -150,22 +73,17 @@ export function usageSummary() {
   const u = loadUsage(); const day = pacificDay();
   return getKeys().map(k => {
     const models = {}; let total = 0;
-    for (const [mm, s] of Object.entries(u[k.id] || {})) { if (s.day !== day) continue; models[mm] = s.count; total += s.count; }
+    for (const [m, s] of Object.entries(u[k.id] || {})) { if (s.day !== day) continue; models[m] = s.count; total += s.count; }
     return { id: k.id, total, models };
   });
 }
 export function todayTotal() { return usageSummary().reduce((n, k) => n + k.total, 0); }
-/** Requests still possible today on `model` of `provider` across healthy keys (Infinity when uncapped). */
-export function remainingToday(model, provider = 'gemini') {
-  const u = loadUsage(); const day = pacificDay(); let n = 0;
-  for (const k of keysOf(provider)) {
-    if (!usable(k)) continue; const C = capsFor(k, model); if (C.rpd === Infinity) return Infinity;
-    const s = u[k.id]?.[model]; if (s && s.day === day && s.dayBlocked === day) continue;
-    n += Math.max(0, C.rpd - (s && s.day === day ? s.count : 0));
-  }
+/** How many more requests today are possible on `model` across all healthy keys (safety-capped). */
+export function remainingToday(model) {
+  const L = limitsFor(model); const u = loadUsage(); const day = pacificDay(); let n = 0;
+  for (const k of getKeys()) { if (k.enabled === false || k.status === 'invalid') continue; const s = u[k.id]?.[model]; if (s && s.day === day && s.dayBlocked === day) continue; n += Math.max(0, safeCap(L.rpd) - (s && s.day === day ? s.count : 0)); }
   return n;
 }
-export const remainingLabel = (model, provider = 'gemini') => { const n = remainingToday(model, provider); return n === Infinity ? 'plenty' : String(n); };
 
 /* ---------------- response cache ---------------- */
 function loadCache() { try { return JSON.parse(Store.getItem(CACHE_KEY) || '{}') || {}; } catch { return {}; } }
@@ -182,26 +100,20 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
   const t = setTimeout(res, ms);
   signal?.addEventListener('abort', () => { clearTimeout(t); rej(new AIError('Cancelled', 'abort')); }, { once: true });
 });
-function parseQuotaError(body, headers) {
+function parseQuotaError(body) {
   const det = body?.error?.details || []; let delay = 0, daily = false;
-  for (const x of Array.isArray(det) ? det : []) {
+  for (const x of det) {
     if (x.retryDelay) delay = parseFloat(x.retryDelay) * 1000 || 0;
     for (const v of x.violations || []) if (/PerDay/i.test(v.quotaId || '') || /per_?day/i.test(v.quotaMetric || '')) daily = true;
   }
-  const msg = errMessage(body, '');
-  if (/per day|daily|tokens per day|\bTPD\b|\bRPD\b|free-models-per-day/i.test(msg)) daily = true;
-  const mm = msg.match(/retry in ([\d.]+)\s*s/i); if (!delay && mm) delay = parseFloat(mm[1]) * 1000;
-  const ra = Number(headers?.get?.('retry-after')); if (!delay && ra > 0) delay = ra * 1000;
-  if (delay > 10 * 60000) daily = true;
+  const msg = body?.error?.message || '';
+  if (/per day|daily/i.test(msg)) daily = true;
+  const m = msg.match(/retry in ([\d.]+)\s*s/i); if (!delay && m) delay = parseFloat(m[1]) * 1000;
   return { delay, daily };
 }
-function errMessage(body, fallback) {
-  const e = body?.error;
-  return (typeof e === 'string' ? e : e?.message) || body?.message || body?.detail || (typeof e?.error === 'string' ? e.error : '') || fallback;
-}
-/** Robust JSON extraction: strips code fences / <think> blocks and repairs a truncated {"questions":[...]} array. */
+/** Robust JSON extraction: strips code fences and repairs a truncated {"questions":[...]} array. */
 export function parseJsonLoose(raw) {
-  const t = String(raw || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+  const t = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
   try { return JSON.parse(t); } catch { /* continue */ }
   const i = t.search(/[[{]/); if (i < 0) throw new AIError('AI did not return JSON', 'parse');
   const j = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'));
@@ -213,270 +125,151 @@ export function parseJsonLoose(raw) {
   }
   throw new AIError('AI response was cut off or not valid JSON. Try fewer questions.', 'parse');
 }
-const JSON_NUDGE = '\n\nReturn ONLY valid JSON — no markdown fences, no commentary.';
-const stripThink = t => String(t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-/* ---------------- low-level requests (each returns a normalised result) ---------------- */
-// → { ok, status, text, truncated, blocked, message, retryMs, daily, body }
-async function fetchJson(url, init, signal) {
+async function request(key, model, prompt, { json, maxTokens, temperature, signal, system }) {
   const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort('timeout'), REQUEST_TIMEOUT);
   const onAbort = () => ctrl.abort('user'); signal?.addEventListener('abort', onAbort, { once: true });
+  const generationConfig = { temperature, maxOutputTokens: maxTokens };
+  if (json) generationConfig.responseMimeType = 'application/json';
+  // Gemini 2.5 Flash "thinking" spends free output tokens; switch it off for quick tasks.
+  if (/^gemini-2\.5-flash/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  const payload = { contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig };
+  if (system) payload.systemInstruction = { parts: [{ text: system }] };
   try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(payload),
+    });
     let body = null; try { body = await res.json(); } catch { /* non-JSON */ }
-    return { res, body };
+    return { status: res.status, ok: res.ok, body };
   } catch (e) {
     if (signal?.aborted) throw new AIError('Cancelled', 'abort');
     if (ctrl.signal.aborted) throw new AIError('AI request timed out', 'timeout');
-    throw new AIError('Network error while contacting the AI service', 'network');
+    throw new AIError('Network error while contacting Gemini', 'network');
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
 }
-function finish(res, body, extra = {}) {
-  const out = { ok: res.ok, status: res.status, body, message: errMessage(body, `Error ${res.status}`), ...extra };
-  if (!res.ok && res.status === 429) { const q = parseQuotaError(body, res.headers); out.retryMs = q.delay; out.daily = q.daily; }
-  return out;
-}
-async function geminiSend(key, model, prompt, { json, maxTokens, temperature, signal, system }) {
-  const plain = /^gemma/i.test(model); // Gemma: no JSON mode, no system instruction
-  const generationConfig = { temperature, maxOutputTokens: maxTokens };
-  if (json && !plain) generationConfig.responseMimeType = 'application/json';
-  if (/^gemini-2\.5-flash/.test(model) || /^gemini-flash/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 }; // spend free tokens on the answer, not on "thinking"
-  const text = (plain && system ? `${system}\n\n` : '') + prompt + (json && plain ? JSON_NUDGE : '');
-  const payload = { contents: [{ role: 'user', parts: [{ text }] }], generationConfig };
-  if (system && !plain) payload.systemInstruction = { parts: [{ text: system }] };
-  const { res, body } = await fetchJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(payload) }, signal);
-  if (!res.ok) return finish(res, body, { badKey: res.status === 400 && /api key|API_KEY/i.test(errMessage(body, '') + JSON.stringify(body?.error?.details || '')) });
-  const cand = body?.candidates?.[0];
-  const out = (cand?.content?.parts || []).map(p => p.text || '').join('');
-  const reason = cand?.finishReason || body?.promptFeedback?.blockReason;
-  return { ok: true, status: 200, text: out, truncated: cand?.finishReason === 'MAX_TOKENS', blocked: !out && /SAFETY|PROHIBITED|BLOCK|RECITATION/i.test(reason || ''), body };
-}
-async function openaiSend(provider, key, model, prompt, { json, maxTokens, temperature, signal, system }) {
-  const P = PROVIDERS[provider]; const base = (provider === 'custom' ? S().customBaseUrl || '' : P.base).replace(/\/+$/, '');
-  if (!base) throw new AIError('Set the base URL of your custom AI endpoint in Settings.', 'nokey');
-  const newStyle = provider === 'openai' && /^(o\d|gpt-5)/i.test(model); // reasoning-style models: no temperature, other token field
-  const messages = [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt + (json ? JSON_NUDGE : '') }];
-  const payload = { model, messages };
-  if (newStyle) payload.max_completion_tokens = Math.max(maxTokens, 4000); else { payload.max_tokens = maxTokens; payload.temperature = temperature; }
-  if (json && P.json) payload.response_format = { type: 'json_object' };
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
-  if (provider === 'openrouter') { headers['HTTP-Referer'] = 'https://quizinox.app'; headers['X-Title'] = 'QUIZINOX'; }
-  const { res, body } = await fetchJson(`${base}/chat/completions`, { method: 'POST', headers, body: JSON.stringify(payload) }, signal);
-  if (!res.ok) return finish(res, body);
-  if (body?.error) return { ok: false, status: Number(body.error.code) || 502, message: errMessage(body, 'Provider error'), body };
-  const c = body?.choices?.[0]; let t = c?.message?.content; if (Array.isArray(t)) t = t.map(x => x?.text || '').join('');
-  t = stripThink(t);
-  return { ok: true, status: 200, text: t || '', truncated: c?.finish_reason === 'length', blocked: !t && c?.finish_reason === 'content_filter', body };
-}
-async function anthropicSend(key, model, prompt, { json, maxTokens, temperature, signal, system }) {
-  const payload = { model, max_tokens: maxTokens, temperature: Math.min(1, temperature), messages: [{ role: 'user', content: prompt + (json ? JSON_NUDGE : '') }] };
-  if (system) payload.system = system;
-  const { res, body } = await fetchJson('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify(payload) }, signal);
-  if (!res.ok) return finish(res, body);
-  const t = (body?.content || []).map(x => x?.text || '').join('');
-  return { ok: true, status: 200, text: t, truncated: body?.stop_reason === 'max_tokens', blocked: !t && body?.stop_reason === 'refusal', body };
-}
-/* Puter.js — "log in with your Puter account" instead of an API key (experimental). */
-let puterLoading = null;
-function loadPuter() {
-  if (globalThis.puter) return Promise.resolve(globalThis.puter);
-  if (puterLoading) return puterLoading;
-  puterLoading = new Promise((resolve, reject) => {
-    const s = document.createElement('script'); s.src = 'https://js.puter.com/v2/'; s.async = true;
-    s.onload = () => resolve(globalThis.puter);
-    s.onerror = () => { puterLoading = null; s.remove(); reject(new AIError('Could not load Puter (internet needed).', 'network')); };
-    document.head.appendChild(s);
-  });
-  return puterLoading;
-}
-export async function puterSignIn() { const p = await loadPuter(); if (!p.auth.isSignedIn()) await p.auth.signIn(); const ok = !!p.auth.isSignedIn(); if (ok) { ctx.getSettings().puterLinked = true; ctx.saveSettings(); } return ok; }
-export async function puterSignOut() { try { const p = await loadPuter(); await p.auth.signOut(); } catch { /* */ } ctx.getSettings().puterLinked = false; ctx.saveSettings(); }
-export async function puterIsSignedIn() { try { const p = await loadPuter(); return !!p.auth.isSignedIn(); } catch { return false; } }
-async function puterSend(model, prompt, { json, maxTokens, temperature, signal, system }) {
-  const p = await loadPuter();
-  if (!p.auth.isSignedIn()) return { ok: false, status: 401, message: 'Puter is signed out. Sign in again in Settings.', signedOut: true };
-  const messages = [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt + (json ? JSON_NUDGE : '') }];
-  const opts = { temperature, max_tokens: maxTokens }; if (model) opts.model = model;
-  const job = p.ai.chat(messages, opts);
-  const guard = new Promise((_, rej) => { const t = setTimeout(() => rej(new AIError('AI request timed out', 'timeout')), REQUEST_TIMEOUT); signal?.addEventListener('abort', () => { clearTimeout(t); rej(new AIError('Cancelled', 'abort')); }, { once: true }); });
-  try {
-    const r = await Promise.race([job, guard]);
-    let t = typeof r === 'string' ? r : r?.message?.content ?? r?.text ?? ''; if (Array.isArray(t)) t = t.map(x => x?.text || '').join('');
-    return { ok: true, status: 200, text: stripThink(t), truncated: false, blocked: false };
-  } catch (e) {
-    if (e instanceof AIError) throw e;
-    const msg = e?.error?.message || e?.message || (typeof e === 'string' ? e : 'Puter request failed');
-    return { ok: false, status: /limit|insufficient|funds|quota/i.test(msg) ? 429 : 500, message: msg, daily: /insufficient|funds|quota/i.test(msg) };
-  }
-}
-function send(provider, key, model, prompt, o) {
-  const kind = PROVIDERS[provider]?.kind;
-  if (provider === 'puter') return puterSend(model, prompt, o);
-  if (kind === 'gemini') return geminiSend(key, model, prompt, o);
-  if (kind === 'anthropic') return anthropicSend(key, model, prompt, o);
-  return openaiSend(provider, key, model, prompt, o);
-}
 
-/* ---------------- route planning ---------------- */
-function keyCandidates(provider) { return provider === 'puter' ? [{ id: 'puter', label: 'Puter login', key: 'puter', provider: 'puter' }] : keysOf(provider).filter(usable); }
-function buildRoutes(preferModel) {
-  const s = S(); const mode = s.aiMode || 'auto'; const routes = []; const seen = new Set();
-  const add = (provider, model) => { const id = provider + '|' + model; if (!seen.has(id) && routes.length < MAX_ROUTES) { seen.add(id); routes.push({ provider, model }); } };
-  if (mode !== 'api' && puterLinked()) add('puter', s.puterModel || '');
-  if (mode !== 'login') {
-    const order = [primaryProvider(), ...providerOrder()].filter((p, i, a) => a.indexOf(p) === i).filter(p => providerEnabled(p) && keyCandidates(p).length);
-    const list = s.aiCross === false ? order.slice(0, 1) : order;
-    list.forEach((p, i) => {
-      const P = PROVIDERS[p]; const first = (i === 0 && preferModel) || selectedModel(p);
-      if (first) add(p, first);
-      if (s.aiAutoFallback !== false) P.chain.forEach(mm => add(p, mm));
-    });
-  }
-  return routes;
+/* Multi-provider API adapters. Free-tier access and model availability are controlled by each provider. */
+export const PROVIDERS = {
+  gemini: { label: 'Google Gemini', placeholder: 'AIza…', models: ['gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.0-flash','gemini-2.0-flash-lite','gemini-2.5-pro'] },
+  groq: { label: 'Groq', placeholder: 'gsk_…', models: ['llama-3.3-70b-versatile','llama-3.1-8b-instant','openai/gpt-oss-120b','openai/gpt-oss-20b','qwen/qwen3-32b'] },
+  openrouter: { label: 'OpenRouter', placeholder: 'sk-or-…', models: ['openrouter/free','meta-llama/llama-3.3-70b-instruct:free','google/gemma-3-27b-it:free','deepseek/deepseek-r1-0528:free','qwen/qwen3-4b:free'] },
+  openai: { label: 'OpenAI', placeholder: 'sk-…', models: ['gpt-4.1-mini','gpt-4.1-nano','gpt-4o-mini','o4-mini'] },
+  anthropic: { label: 'Anthropic Claude', placeholder: 'sk-ant-…', models: ['claude-3-5-haiku-latest','claude-3-7-sonnet-latest','claude-sonnet-4-20250514','claude-opus-4-20250514'] },
+  huggingface: { label: 'Hugging Face', placeholder: 'hf_…', models: ['Qwen/Qwen2.5-7B-Instruct','meta-llama/Llama-3.1-8B-Instruct','HuggingFaceH4/zephyr-7b-beta'] }
+};
+async function providerRequest(k, model, prompt, {json=true,maxTokens=2048,temperature=.5,signal,system}={}) {
+  const provider=k.provider||'gemini';
+  if(provider==='gemini') return request(k.key,model,prompt,{json,maxTokens,temperature,signal,system});
+  const headers={'Content-Type':'application/json'}; let url='', body={};
+  if(provider==='anthropic') { url='https://api.anthropic.com/v1/messages'; headers['x-api-key']=k.key; headers['anthropic-version']='2023-06-01'; headers['anthropic-dangerous-direct-browser-access']='true'; body={model,max_tokens:maxTokens,temperature,system:system||undefined,messages:[{role:'user',content:prompt}]}; }
+  else { url=provider==='groq'?'https://api.groq.com/openai/v1/chat/completions':provider==='openrouter'?'https://openrouter.ai/api/v1/chat/completions':provider==='huggingface'?'https://router.huggingface.co/v1/chat/completions':'https://api.openai.com/v1/chat/completions'; headers.Authorization=`Bearer ${k.key}`; if(provider==='openrouter'){headers['HTTP-Referer']='https://quizinox.app';headers['X-Title']='QUIZINOX';} body={model,messages:[...(system?[{role:'system',content:system}]:[]),{role:'user',content:prompt}],temperature,max_tokens:maxTokens}; if(json) body.response_format={type:'json_object'}; }
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),REQUEST_TIMEOUT),onAbort=()=>ctrl.abort(); signal?.addEventListener('abort',onAbort,{once:true});
+  try { const res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body),signal:ctrl.signal}); let data={};try{data=await res.json();}catch{} if(!res.ok)return {ok:false,status:res.status,body:{error:{message:data?.error?.message||data?.message||`HTTP ${res.status}`}}}; const text=provider==='anthropic'?(data.content||[]).filter(x=>x.type==='text').map(x=>x.text).join(''):data.choices?.[0]?.message?.content||''; return {ok:true,status:res.status,body:{candidates:[{content:{parts:[{text}]},finishReason:'STOP'}]}}; }
+  catch(e){if(signal?.aborted)throw new AIError('Cancelled','abort');throw new AIError(`Network error while contacting ${PROVIDERS[provider]?.label||provider}`,'network');} finally{clearTimeout(timer);signal?.removeEventListener('abort',onAbort);}
 }
 
 /**
- * Main entry. Returns { text, model, provider, keyLabel, truncated }.
- * opts: json, maxTokens, temperature, model (preferred for the first provider), signal, onStatus(msg), system
+ * Main entry. Returns { text, model, keyLabel }.
+ * opts: json, maxTokens, temperature, model (preferred), signal, onStatus(msg), system
  */
 export async function aiCall(prompt, opts = {}) {
   const { json = true, maxTokens = 2048, temperature = json ? 0.6 : 0.4, model, signal, onStatus = () => {}, system } = opts;
   if (typeof navigator !== 'undefined' && !navigator.onLine) throw new AIError('No internet connection. AI needs internet — all offline features still work.', 'offline');
-  const mode = S().aiMode || 'auto';
-  if (!aiReady()) throw new AIError(mode === 'login' ? 'Sign in to Puter in Settings → AI, or switch to "API keys".' : 'Add an AI API key (or sign in) in Settings → AI.', 'nokey');
-  const routes = buildRoutes(model);
-  if (!routes.length) throw new AIError('No AI provider is enabled. Check Settings → AI.', 'nokey');
-  const st = { lastErr: null, sawLimit: false, minWait: Infinity, tried: 0 };
-  const o = { json, maxTokens, temperature, signal, system };
-
-  const runRoute = async (route, allowWait) => {
-    const { provider, model: m } = route; const P = provider === 'puter' ? { name: 'Puter', kind: 'puter' } : PROVIDERS[provider];
-    const cands = keyCandidates(provider); if (!cands.length) return null;
-    let overload = 0, guard = 0;
-    while (guard++ < cands.length * 3 + 6) {
+  const allKeys = getAllKeys().filter(k => k.enabled !== false && k.status !== 'invalid');
+  if (!allKeys.length) throw new AIError('Add at least one provider API key in Settings → AI providers.', 'nokey');
+  const st = ctx.getSettings();
+  const primary = model || st.aiModel || FALLBACK_CHAIN[0];
+  const preferredProvider = String(primary).includes(':') ? String(primary).split(':')[0] : (st.aiProvider || 'gemini');
+  const chosenModel = String(primary).includes(':') ? String(primary).slice(String(primary).indexOf(':')+1) : primary;
+  const providerKeys = allKeys.slice().sort((a,b) => (a.provider||'gemini')===preferredProvider ? -1 : (b.provider||'gemini')===preferredProvider ? 1 : 0);
+  let lastErr = null; let sawLimit = false;
+  for (const k of providerKeys) {
+    const provider=k.provider||'gemini'; if(provider==='gemini') continue;
+    const m=(provider===preferredProvider ? chosenModel : (PROVIDERS[provider]?.models?.[0] || chosenModel));
+    try { onStatus(`Trying ${PROVIDERS[provider]?.label||provider} · ${m}…`); const r=await providerRequest(k,m,prompt,{json,maxTokens,temperature,signal,system});
+      if(r.ok){const text=(r.body?.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('');if(text)return {text,model:m,keyLabel:k.label,provider};}
+      lastErr=new AIError(r.body?.error?.message||`${provider} request failed (${r.status})`,r.status===429?'limit':'provider');
+      if(r.status===401||r.status===403)updateKey(k.id,{status:'invalid',lastError:lastErr.message.slice(0,150)});
+    } catch(e){if(e.code==='abort')throw e;lastErr=e;}
+  }
+  const keys = getKeys().filter(k => k.enabled !== false);
+  if (!keys.length) throw lastErr || new AIError('All configured AI providers failed. Check API keys, model access and provider limits.','provider');
+  for (const m of chain) {
+    let overload = 0, guard = 0, modelMissing = false;
+    while (guard++ < keys.length * 3 + 6) {
       if (signal?.aborted) throw new AIError('Cancelled', 'abort');
-      const avail = cands.map(k => ({ k, a: provider === 'puter' ? keyAvailability({ ...k, tier: 'paid' }, m || 'default') : keyAvailability(k, m) }));
+      const avail = keys.map(k => ({ k, a: keyAvailability(k, m) }));
       const ready = avail.filter(x => x.a.ok).sort((x, y) => x.a.used - y.a.used);
       if (!ready.length) {
-        if (avail.some(x => ['daily', 'minute', 'cooldown'].includes(x.a.reason))) st.sawLimit = true;
+        if (avail.some(x => x.a.reason === 'daily' || x.a.reason === 'minute' || x.a.reason === 'cooldown')) sawLimit = true;
         const waits = avail.filter(x => x.a.reason === 'minute' || x.a.reason === 'cooldown').map(x => x.a.wait);
-        const w = waits.length ? Math.min(...waits) : Infinity; st.minWait = Math.min(st.minWait, w);
-        if (allowWait && w <= MAX_WAIT_FOR_SLOT) { onStatus(`Staying inside the free limit — waiting ${Math.ceil(w / 1000)}s…`); await sleep(w, signal); continue; }
-        return null;
+        const w = waits.length ? Math.min(...waits) : Infinity;
+        if (w <= MAX_WAIT_FOR_SLOT) { onStatus(`Staying inside the free limit — waiting ${Math.ceil(w / 1000)}s…`); await sleep(w, signal); continue; }
+        break; // nothing usable on this model now → next model
       }
-      const { k } = ready[0]; const slotModel = m || 'default';
-      patchSlot(k.id, slotModel, s => { s.recent.push(Date.now()); s.count++; });
-      onStatus(`Asking ${P.name} · ${modelLabel(provider, m) || 'default model'}${cands.length > 1 ? ` · key "${k.label || 'key'}"` : ''}…`);
+      const { k } = ready[0];
+      patchSlot(k.id, m, s => { s.recent.push(Date.now()); s.count++; });
+      onStatus(`Asking ${limitsFor(m).name}${keys.length > 1 ? ` · key "${k.label || 'key'}"` : ''}…`);
       let r;
-      try { r = await send(provider, k.key, m, prompt, o); }
+      try { r = await request(k.key, m, prompt, { json, maxTokens, temperature, signal, system }); }
       catch (e) {
         if (e.code === 'abort') throw e;
-        if (e.code === 'nokey') { st.lastErr = e; return null; }
-        st.lastErr = e;
+        lastErr = e;
         if (typeof navigator !== 'undefined' && !navigator.onLine) throw new AIError('Internet connection lost.', 'offline');
-        patchSlot(k.id, slotModel, s => { s.cooldownUntil = Date.now() + 8000; });
-        if (++overload >= 2) return null; continue;
+        patchSlot(k.id, m, s => { s.cooldownUntil = Date.now() + 8000; });
+        continue;
       }
+      const msg = r.body?.error?.message || `Gemini error ${r.status}`;
       if (r.ok) {
-        if (!r.text) {
-          if (r.blocked) throw new AIError(`${P.name} declined to answer this request (safety filter). Try rephrasing.`, 'blocked');
-          st.lastErr = new AIError('Empty AI response', 'empty'); patchSlot(k.id, slotModel, s => { s.cooldownUntil = Date.now() + 4000; }); if (++overload >= 2) return null; continue;
+        const cand = r.body?.candidates?.[0];
+        const text = (cand?.content?.parts || []).map(p => p.text || '').join('');
+        if (!text) {
+          const reason = cand?.finishReason || r.body?.promptFeedback?.blockReason;
+          if (/SAFETY|PROHIBITED|BLOCK|RECITATION/i.test(reason || '')) throw new AIError('Gemini declined to answer this request (safety filter). Try rephrasing.', 'blocked');
+          lastErr = new AIError('Empty AI response', 'empty'); patchSlot(k.id, m, s => { s.cooldownUntil = Date.now() + 4000; }); continue;
         }
-        if (provider !== 'puter' && (k.status !== 'ok' || k.lastError)) updateKey(k.id, { status: 'ok', lastError: '', checkedAt: Date.now() });
-        return { text: r.text, model: m, provider, keyLabel: k.label, truncated: !!r.truncated };
+        if (k.status !== 'ok' || k.lastError) updateKey(k.id, { status: 'ok', lastError: '', checkedAt: Date.now() });
+        return { text, model: m, keyLabel: k.label, truncated: cand?.finishReason === 'MAX_TOKENS' };
       }
-      const msg = r.message || `${P.name} error ${r.status}`;
-      if (r.signedOut) { ctx.getSettings().puterLinked = false; ctx.saveSettings(); st.lastErr = new AIError(msg, 'invalid'); return null; }
-      if (r.status === 429 || r.status === 402) {
-        st.sawLimit = true; const daily = r.status === 402 || r.daily;
-        patchSlot(k.id, slotModel, s => { if (daily) s.dayBlocked = pacificDay(); else s.cooldownUntil = Date.now() + Math.max(r.retryMs || 0, 20000); });
-        if (provider !== 'puter') updateKey(k.id, { status: 'limited', lastError: daily ? `Daily/credit limit reached on ${m}` : `Rate-limited on ${m}` });
-        st.lastErr = new AIError(`${P.name} free limit reached.`, 'limit'); continue;
+      if (r.status === 429) {
+        const q = parseQuotaError(r.body); sawLimit = true;
+        patchSlot(k.id, m, s => { if (q.daily) s.dayBlocked = pacificDay(); else s.cooldownUntil = Date.now() + Math.max(q.delay || 0, 20000); });
+        updateKey(k.id, { status: 'limited', lastError: q.daily ? `Daily free limit reached on ${m}` : `Rate-limited on ${m}` });
+        lastErr = new AIError('Gemini free limit reached.', 'limit');
+        continue;
       }
-      if (r.badKey || r.status === 401 || r.status === 403) {
-        if (provider !== 'puter') updateKey(k.id, { status: 'invalid', lastError: (r.badKey ? 'API key not valid' : msg).slice(0, 160) });
-        st.lastErr = new AIError(`${P.name} key rejected: ${msg}`, 'invalid'); continue;
+      if (r.status === 400 && /api key|API_KEY/i.test(msg + JSON.stringify(r.body?.error?.details || ''))) {
+        updateKey(k.id, { status: 'invalid', lastError: 'API key not valid' }); lastErr = new AIError('An API key is invalid.', 'invalid'); continue;
       }
-      if (r.status === 404) { st.lastErr = new AIError(`Model "${m}" is not available on ${P.name}.`, 'model'); onStatus(`Model ${m} unavailable — trying another…`); return null; }
+      if (r.status === 401 || r.status === 403) {
+        updateKey(k.id, { status: 'invalid', lastError: msg.slice(0, 160) }); lastErr = new AIError(`Key rejected: ${msg}`, 'invalid'); continue;
+      }
+      if (r.status === 404) { lastErr = new AIError(`Model "${m}" is not available for this key.`, 'model'); modelMissing = true; break; }
       if (r.status >= 500) {
-        overload++; patchSlot(k.id, slotModel, s => { s.cooldownUntil = Date.now() + 15000; });
-        st.lastErr = new AIError(`${P.name} is overloaded right now.`, 'overload'); if (overload >= 2) return null; continue;
+        overload++; patchSlot(k.id, m, s => { s.cooldownUntil = Date.now() + 15000; });
+        lastErr = new AIError('Gemini is overloaded right now.', 'overload');
+        if (overload >= 2) break; continue;
       }
-      st.lastErr = new AIError(`${P.name}: ${msg}`, 'bad'); return null; // other 4xx: try the next model / provider
+      lastErr = new AIError(msg, 'bad'); break; // other 4xx: try next model
     }
-    return null;
-  };
-
-  const pass = async allowWait => {
-    for (const route of routes) {
-      const r = await runRoute(route, allowWait); st.tried++;
-      if (r) return r;
-    }
-    return null;
-  };
-  let result = await pass(false);
-  if (!result && st.sawLimit && st.minWait <= MAX_WAIT_FOR_SLOT) result = await pass(true); // short per-minute limits: wait, then retry
-  if (result) {
-    if (result.provider !== routes[0]?.provider) onStatus(`Switched to ${providerName(result.provider)} ✓`);
-    return result;
+    if (modelMissing) onStatus(`Model ${m} unavailable — trying another…`);
   }
-  if (st.sawLimit) throw new AIError('Every AI key/provider has hit its free limit for now. Wait a minute (daily limits reset the next day), or add another key / provider in Settings → AI.', 'limit');
-  throw st.lastErr || new AIError('AI request failed', 'error');
+  if (sawLimit) throw new AIError('All your Gemini keys have reached the free limit for now. Wait a minute (or until tomorrow for daily limits), or add another key in Settings.', 'limit');
+  throw lastErr || new AIError('AI request failed', 'error');
 }
 
 /** Test one key with a tiny request (uses 1 request of quota). */
 export async function testKey(id, model) {
-  const k = getKeys().find(x => x.id === id); if (!k) throw new AIError('Key not found', 'nokey');
-  const provider = providerOf(k); const m = model || selectedModel(provider);
-  if (!m) return { ok: false, message: 'Choose or type a model name for this provider first.' };
+  const k = getAllKeys().find(x => x.id === id); if (!k) throw new AIError('Key not found', 'nokey');
+  const provider=k.provider||'gemini';
+  if(provider!=='gemini') { const m=(String(model||'').startsWith(provider+':')?String(model).slice(provider.length+1):PROVIDERS[provider]?.models?.[0]); const r=await providerRequest(k,m,'Reply with the single word OK',{json:false,maxTokens:12,temperature:0}); if(r.ok){updateKey(k.id,{status:'ok',lastError:'',checkedAt:Date.now()});return {ok:true,model:m};} const msg=r.body?.error?.message||`HTTP ${r.status}`; if(r.status===401||r.status===403)updateKey(k.id,{status:'invalid',lastError:msg.slice(0,150)}); if(r.status===429)updateKey(k.id,{status:'limited',lastError:'Provider rate limit reached'}); return {ok:false,limited:r.status===429,message:msg}; }
+  const m = model || ctx.getSettings().aiModel || FALLBACK_CHAIN[0];
   patchSlot(k.id, m, s => { s.recent.push(Date.now()); s.count++; });
-  let r; try { r = await send(provider, k.key, m, 'Reply with the single word OK', { json: false, maxTokens: 16, temperature: 0 }); }
-  catch (e) { return { ok: false, message: e.message }; }
-  if (r.ok) { updateKey(k.id, { status: 'ok', lastError: '', checkedAt: Date.now() }); return { ok: true, model: m, provider }; }
-  const msg = r.message || `HTTP ${r.status}`;
-  if (r.status === 429 || r.status === 402) { patchSlot(k.id, m, s => { if (r.daily || r.status === 402) s.dayBlocked = pacificDay(); else s.cooldownUntil = Date.now() + Math.max(r.retryMs || 0, 20000); }); updateKey(k.id, { status: 'limited', lastError: r.daily ? 'Daily free limit reached' : 'Rate-limited' }); return { ok: false, limited: true, message: 'Key works but its free limit / credit is used up right now.' }; }
+  const r = await request(k.key, m, 'Reply with the single word OK', { json: false, maxTokens: 10, temperature: 0 });
+  if (r.ok) { updateKey(k.id, { status: 'ok', lastError: '', checkedAt: Date.now() }); return { ok: true, model: m }; }
+  const msg = r.body?.error?.message || `HTTP ${r.status}`;
+  if (r.status === 429) { const q = parseQuotaError(r.body); patchSlot(k.id, m, s => { if (q.daily) s.dayBlocked = pacificDay(); else s.cooldownUntil = Date.now() + Math.max(q.delay || 0, 20000); }); updateKey(k.id, { status: 'limited', lastError: q.daily ? 'Daily free limit reached' : 'Rate-limited' }); return { ok: false, limited: true, message: 'Key works but its free limit is reached right now.' }; }
   if (r.status === 404) return { ok: false, message: `Model ${m} not available for this key — choose another model.` };
-  if (r.badKey || r.status === 400 || r.status === 401 || r.status === 403) { updateKey(k.id, { status: 'invalid', lastError: msg.slice(0, 160) }); return { ok: false, message: msg }; }
+  if (r.status === 400 || r.status === 401 || r.status === 403) { updateKey(k.id, { status: 'invalid', lastError: msg.slice(0, 160) }); return { ok: false, message: msg }; }
   return { ok: false, message: msg };
-}
-export async function testPuter() {
-  const r = await puterSend(S().puterModel || '', 'Reply with the single word OK', { json: false, maxTokens: 16, temperature: 0 });
-  return r.ok ? { ok: true } : { ok: false, message: r.message };
-}
-
-/** Ask a provider which models a key can use (fills the "all models" dropdown). */
-export async function listModels(provider, keyId) {
-  const k = (keyId ? getKeys().find(x => x.id === keyId) : keysOf(provider).find(usable)) || keysOf(provider)[0];
-  if (!k) throw new AIError('Add a key for this provider first.', 'nokey');
-  const P = PROVIDERS[provider]; let list = [];
-  if (P.kind === 'gemini') {
-    const out = []; let token = '';
-    for (let page = 0; page < 5; page++) {
-      const { res, body } = await fetchJson(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200${token ? `&pageToken=${encodeURIComponent(token)}` : ''}`, { headers: { 'x-goog-api-key': k.key } });
-      if (!res.ok) throw new AIError(errMessage(body, `Could not list models (${res.status})`), 'bad');
-      for (const x of body.models || []) if ((x.supportedGenerationMethods || []).includes('generateContent')) out.push({ id: String(x.name).replace(/^models\//, ''), name: x.displayName || x.name });
-      token = body.nextPageToken || ''; if (!token) break;
-    }
-    list = out.filter(x => !/embedding|aqa|imagen|veo|tts|image-generation|live|robotics/i.test(x.id));
-  } else if (P.kind === 'anthropic') {
-    const { res, body } = await fetchJson('https://api.anthropic.com/v1/models?limit=100', { headers: { 'x-api-key': k.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' } });
-    if (!res.ok) throw new AIError(errMessage(body, `Could not list models (${res.status})`), 'bad');
-    list = (body.data || []).map(x => ({ id: x.id, name: x.display_name || x.id }));
-  } else {
-    const base = (provider === 'custom' ? S().customBaseUrl || '' : P.base).replace(/\/+$/, ''); if (!base) throw new AIError('Set the custom base URL first.', 'nokey');
-    const { res, body } = await fetchJson(`${base}/models`, { headers: { Authorization: `Bearer ${k.key}` } });
-    if (!res.ok) throw new AIError(errMessage(body, `Could not list models (${res.status})`), 'bad');
-    list = (body.data || body.models || []).map(x => ({ id: x.id || x.name, name: x.name || x.id, free: provider === 'openrouter' ? (x.pricing && Number(x.pricing.prompt) === 0 && Number(x.pricing.completion) === 0) || /:free$/.test(x.id) : undefined }))
-      .filter(x => x.id && !/embed|whisper|tts|guard|moderation|dall|image|audio|realtime|rerank|transcribe|vision-preview/i.test(x.id));
-  }
-  list.sort((a, b) => (b.free ? 1 : 0) - (a.free ? 1 : 0) || String(a.id).localeCompare(String(b.id)));
-  const s = ctx.getSettings(); s.aiModelLists = { ...(s.aiModelLists || {}), [provider]: list }; ctx.saveSettings();
-  return list;
-}
-/** Static + fetched models for the dropdown of one provider. */
-export function modelOptions(provider) {
-  const P = PROVIDERS[provider]; const out = new Map();
-  for (const [id, v] of Object.entries(P?.models || {})) out.set(id, { id, name: v.name, note: v.note || '' });
-  for (const x of S().aiModelLists?.[provider] || []) if (!out.has(x.id)) out.set(x.id, { id: x.id, name: x.name || x.id, note: x.free ? 'free' : '' });
-  return [...out.values()];
 }

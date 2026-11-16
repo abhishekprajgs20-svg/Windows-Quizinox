@@ -37,7 +37,6 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => {
-    try { const h = new URL(url).hostname; if (h === 'puter.com' || h.endsWith('.puter.com')) return { action: 'allow' }; } catch { /* ignore */ }
     if (url.startsWith('https://') || url.startsWith('http://')) shell.openExternal(url);
     return { action: 'deny' };
   });
