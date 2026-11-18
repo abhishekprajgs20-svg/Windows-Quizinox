@@ -287,27 +287,61 @@ mark{background:#f3bd6255;color:#fff;border-radius:3px;padding:0 2px}
 @media(max-width:760px){.table-wrap .stat-table td:first-child,.table-wrap .stat-table th:first-child{min-width:130px;max-width:150px;width:150px;font-size:10.5px}}
 .two-col>.panel+.panel{margin-top:0}
 
-/* v2.7 mobile settings layout repair + provider key controls */
-@media(max-width:760px){
-  html,body,#app,.shell,.main,.content,.settings-layout,.settings-layout>.panel{max-width:100%;min-width:0;box-sizing:border-box}
-  .settings-layout>.panel{width:100%;overflow:hidden}
-  .key-add,.key-add.provider-add{grid-template-columns:minmax(0,1fr)!important;width:100%;min-width:0}
-  .key-add>*{min-width:0;width:100%;max-width:100%;box-sizing:border-box}
-  .key-row{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;gap:6px;min-width:0;max-width:100%;box-sizing:border-box}
-  .key-info{min-width:0;overflow:hidden}.key-row .pill{grid-column:2;justify-self:start}
-  .key-row button{font-size:10px;padding:7px 8px;white-space:nowrap}
-  .key-row .mini{grid-column:4;grid-row:1}
-  .settings-layout .notice,.settings-layout p,.settings-layout label{overflow-wrap:anywhere;min-width:0}
-  .settings-layout input,.settings-layout select,.settings-layout button{max-width:100%;box-sizing:border-box}
-}
-.type-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:8px 0 4px}
-.type-actions .textbtn{font-size:11px;padding:7px 10px}
-@media(max-width:760px){
- .key-row{grid-template-columns:24px minmax(0,1fr) auto auto;grid-template-rows:auto auto}
- .key-row>.key-num{grid-column:1;grid-row:1}
- .key-row>.key-info{grid-column:2;grid-row:1}
- .key-row>.pill{grid-column:2;grid-row:2}
- .key-row>[data-ktest]{grid-column:3;grid-row:1}
- .key-row>[data-ktoggle]{grid-column:4;grid-row:1}
- .key-row>[data-kdel]{grid-column:4;grid-row:2;justify-self:end}
-}
+/* ===== QUIZINOX v2.7 — Settings screen fix (phone) + multi-AI UI ===== */
+/* Root cause of the "page stretches past the screen after adding a key": the key list was a grid with an
+   automatic column, so one non-wrapping key row (pill + Test + Disable + ×) forced the whole Settings
+   card wider than the phone. Every grid/flex child now may shrink and wrap, and the card clips overflow. */
+.settings-layout>.panel{overflow-x:hidden}
+.settings-layout .panel *{min-width:0}
+.settings-layout .panel input,.settings-layout .panel select,.settings-layout .panel textarea,.settings-layout .panel button{max-width:100%}
+.settings-layout .panel input:not([type=checkbox]),.settings-layout .panel select,.settings-layout .panel textarea{width:100%}
+.settings-layout .form-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
+.settings-layout .notice,.settings-layout p{overflow-wrap:anywhere}
+.key-list{grid-template-columns:minmax(0,1fr)}
+.key-row{flex-wrap:wrap;row-gap:6px;align-items:flex-start}
+.key-info{flex:1 1 150px}
+.key-info b{display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow-wrap:anywhere}
+.key-info b .tag{font-size:8.5px;font-style:normal;padding:2px 6px}
+.key-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;flex:1 1 100%;padding-left:30px}
+.key-actions .textbtn{padding:4px 2px}
+.key-add{grid-template-columns:repeat(2,minmax(0,1fr))}
+.key-add>input,.key-add>button{grid-column:1/-1}
+.key-add .mini-label{font-size:10.5px;color:#9fb3d1;margin:0}
+.key-add .mini-label select{margin-top:4px}
+.key-add[hidden],.key-add>[hidden]{display:none!important}
+@media(max-width:760px){.key-add{grid-template-columns:minmax(0,1fr)}.key-add>.mini-label{grid-column:1/-1}}
+.settings-layout .title-actions.row{gap:8px}
+.ai-box{border:1px solid #2a3c58;background:#0f1a2b;border-radius:12px;padding:12px;margin:10px 0}
+.ai-box-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.ai-box small.muted{display:block;margin-top:8px;font-size:10px;line-height:1.55}
+.order-list{display:grid;gap:6px;grid-template-columns:minmax(0,1fr);margin:6px 0 10px}
+.order-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#0f1a2b;border:1px solid #2a3c58;border-radius:10px;padding:6px 10px}
+.order-row.dim{opacity:.55}
+.order-row label.check{flex:1 1 150px;margin:0}
+.order-row small{font-size:10px;color:#8ea2c0}
+.order-n{width:20px;height:20px;border-radius:6px;background:#223658;color:#a9c3ff;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none}
+.order-btns{display:flex;gap:4px;margin-left:auto}
+.order-btns .mini{width:30px;height:28px;padding:0}
+.gen-label-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px}
+.gen-label-btns{display:flex;gap:2px;flex-wrap:wrap}
+.type-group{margin:6px 0}.type-group>small{display:block;font-size:9.5px;letter-spacing:.8px;text-transform:uppercase;color:#7d92b3;margin-bottom:4px}
+.gen-sel{display:flex;gap:2px;flex-wrap:wrap}
+
+/* ===== QUIZINOX v2.8 — attempt mistakes / correct, AI accounts, web chat ===== */
+.attempt-split{margin:14px 0 4px;padding:14px;border:1px solid #2a3c58;border-radius:14px;background:#0f1a2b}
+.attempt-split .eyebrow{margin-bottom:10px}
+.attempt-split-btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px}
+.attempt-btn{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:13px 15px;border-radius:12px;border:1px solid transparent;color:#fff;cursor:pointer;min-width:0}
+.attempt-btn b{font-size:14px;letter-spacing:.6px}
+.attempt-btn small{font-size:11px;opacity:.85}
+.attempt-mistakes{background:linear-gradient(135deg,#d6455d,#a42a45);border-color:#ff7a90}
+.attempt-correct{background:linear-gradient(135deg,#1fa56f,#14795a);border-color:#51d6a0}
+.attempt-btn:active{transform:scale(.98)}
+.ai-box.dim,.ai-box .order-row.dim{opacity:.6}
+.login-row .login-model{flex:1 1 100%;margin-top:2px}
+.login-row .check{flex:1 1 170px}
+.web-steps{margin:8px 0 12px;padding-left:20px;display:grid;gap:4px;font-size:13px;line-height:1.5}
+.web-prompt{margin:10px 0}
+.web-prompt summary{cursor:pointer;font-size:12px;color:#8eafff}
+.web-prompt textarea{margin-top:6px;font-size:11px}
+.btn-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;padding:10px 16px;border-radius:10px;border:1px solid #34507c;color:#cfe0ff;background:#18294a;font-size:13px}
