@@ -168,3 +168,22 @@ The installer will be created in `release/QUIZINOX-Setup-2.4.0.exe`. For a no-in
 - **Login accounts:** one Puter sign-in → switch on/off ChatGPT (GPT), Claude, Gemini, DeepSeek, Grok, Llama, Mistral or any other model id; each has its own model box, ▲▼ order and Test button. "Load all models" fills the model lists from your Puter account. If one AI fails the next one continues the same job.
 - **Web chat:** use your *own* ChatGPT / Gemini / Claude / Grok / DeepSeek / Perplexity / Copilot / Le Chat / Meta AI / Qwen / any website login (free or paid). QUIZINOX gives you the prompt → paste into the site → paste the reply back.
 - Direct "Sign in with ChatGPT/Gemini/Claude" inside a third-party app is not offered by those companies, which is why login goes through Puter and the Web-chat bridge.
+
+---
+
+## v2.9.0 — what changed
+
+**Quiz mode chooser:** Exam · Practice · **OMR mode** (new).
+- **OMR mode:** question paper + a real OMR answer sheet (Auto / 100 / 150 / 200 rows, bubbles A–D, tap again to erase), optional time limit, auto-evaluation on submit. On phones switch between *Question paper* and *OMR sheet*.
+- **Sections:** any quiz with sections (mock / section test) runs with section timers — when a section's time ends the next one starts automatically, the last one auto-submits. Works in Exam, Practice and OMR mode. Shuffle only mixes questions *inside* a section. No explanations in exam / OMR until the result; the result shows a section-wise table.
+
+**New tabs (all lazy-loaded, so start-up speed is unchanged):**
+- **Mock & Sections** — *Full Mock Test Simulator* (any number of sections, total time presets 2h / 1h30 / 1h / 45 / 30 / 15 / 10 min or custom, section-wise or one overall timer, negative marking, pass %) and *Section Mode* (one section: time + question count). Questions per section come from **your quizzes** (random or in sequence), **TXT/JSON**, **instant AI** or **typed manually** — always exactly the number you set.
+- **Mistake Notebook** — every wrong answer is collected automatically (old attempts are imported once); answer it correctly twice in a row → auto-mastered, or mark it yourself; build **mistake-based mock tests** (subject filter, most-missed-first, timer, subject sections).
+- **Achievements** — XP & levels, daily-streak rewards, badges (100 / 500 / 1000 questions solved …), subject-mastery tiers, personal bests. Shown only here.
+- **Quizinox Analyser** — AI teacher (separate from AI Studio): any doubt, your history & mistakes, Easy / Moderate / Advanced, follow-up questions that are graded.
+- **Quizinox Predictor** — readiness score, estimated range with confidence, subject-wise readiness, weak topics, consistency, trend chart, chance of reaching your target %, optional AI coach report.
+
+**Quiz ⋯ menu → Extract notes:** downloads a study-notes HTML in the exact Notes Generator format.
+
+**Result screen:** ATTEMPT MISTAKES · ATTEMPT CORRECT · PRACTISE MISTAKES now sit at the **top**, above the answer review (same code on Windows and Android).

@@ -996,7 +996,7 @@ function exportAll(){
   var blob=new Blob([doc],{type:'text/html;charset=utf-8'});
   var url=URL.createObjectURL(blob);
   var a=document.createElement('a');
-  a.href=url;a.download=(window.__quizinoxFilename||'all-study-notes.html');
+  a.href=url;a.download='all-study-notes.html';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   setTimeout(function(){URL.revokeObjectURL(url);},3000);
 }
@@ -1121,23 +1121,5 @@ function exportRangePDF(){
   generateAndDownloadPDF(sel,filename);
 }
 </script>
-
-<script>
-/* QUIZINOX integration: accept a quiz from the parent app and export notes in this tool's native format. */
-window.addEventListener('message', function(ev) {
-  if (!ev.data || ev.data.type !== 'QUIZINOX_NOTES_EXPORT' || typeof ev.data.text !== 'string' || window.__quizinoxNotesBusy) return;
-  window.__quizinoxNotesBusy = true;
-  window.__quizinoxFilename = ev.data.filename || 'all-study-notes.html';
-  startProcessing(ev.data.text);
-  var wait = setInterval(function() {
-    if (questions && questions.length && document.getElementById('app-screen').style.display === 'flex') {
-      clearInterval(wait);
-      setTimeout(function(){ exportAll(); }, 350);
-    }
-  }, 120);
-  setTimeout(function(){ clearInterval(wait); window.__quizinoxNotesBusy = false; }, 12000);
-});
-</script>
-
 </body>
 </html>

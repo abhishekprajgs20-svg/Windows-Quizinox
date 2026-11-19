@@ -36,7 +36,7 @@ function explanationLines(value) {
 const L = i => String.fromCharCode(65 + i);
 const STORE = 'quizinox_local_v1', PLAY_STORE = 'quizinox_play_v1';
 const APP_VERSION = '2.9.0';
-const defaultState = () => ({ quizzes: [], attempts: [], shuffleHistory: {}, bookmarks: {}, revision: {}, revStats: { mastered: 0 }, aiAnalysis: null, aiLog: {}, settings: { name: 'Learner', geminiKey: '', aiKeys: [], aiModel: AI.FALLBACK_CHAIN[0], aiModels: {}, aiPrimary: 'gemini', aiMode: 'auto', aiOrder: AI.DEFAULT_ORDER.slice(), aiDisabled: {}, aiCross: true, aiGuard: true, puterLinked: false, puterModel: '', customBaseUrl: '', aiModelLists: {}, aiAutoFallback: true, analystDaily: 5, tutorLang: 'English', langMode: 'single', langs: ['original'], aiSource: 'default', aiLogin: { enabled: {}, models: {}, order: [], modelList: [] }, aiWeb: { site: 'chatgpt', customUrl: '' } }, activeTab: 'home' });
+const defaultState = () => ({ quizzes: [], attempts: [], notebook: { items: {} }, notebookSeeded: false, achSeen: [], analyser: [], shuffleHistory: {}, bookmarks: {}, revision: {}, revStats: { mastered: 0 }, aiAnalysis: null, aiLog: {}, settings: { name: 'Learner', geminiKey: '', aiKeys: [], aiModel: AI.FALLBACK_CHAIN[0], aiModels: {}, aiPrimary: 'gemini', aiMode: 'auto', aiOrder: AI.DEFAULT_ORDER.slice(), aiDisabled: {}, aiCross: true, aiGuard: true, puterLinked: false, puterModel: '', customBaseUrl: '', aiModelLists: {}, aiAutoFallback: true, analystDaily: 5, tutorLang: 'English', langMode: 'single', langs: ['original'], aiSource: 'default', aiLogin: { enabled: {}, models: {}, order: [], modelList: [] }, aiWeb: { site: 'chatgpt', customUrl: '' } }, activeTab: 'home' });
 let db = load();
 let currentQuiz = null, play = null, toastTimer = null, lastResult = null;
 AI.initAI({ getSettings: () => db.settings, saveSettings: () => save(), askWeb: o => askWebChat(o) });
@@ -44,7 +44,7 @@ AI.initAI({ getSettings: () => db.settings, saveSettings: () => save(), askWeb: 
 function normalizeState(d) {
   const base = defaultState(); d = d && typeof d === 'object' ? d : {};
   const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  const s = { ...base, ...d, settings: { ...base.settings, ...obj(d.settings) }, quizzes: Array.isArray(d.quizzes) ? d.quizzes : [], attempts: Array.isArray(d.attempts) ? d.attempts : [], shuffleHistory: obj(d.shuffleHistory), bookmarks: obj(d.bookmarks), revision: obj(d.revision), revStats: { mastered: 0, ...obj(d.revStats) }, aiLog: obj(d.aiLog), sections: Array.isArray(d.sections) ? d.sections : [], achievements: obj(d.achievements), mistakeMastered: obj(d.mistakeMastered), mistakeNotebook: obj(d.mistakeNotebook) };
+  const s = { ...base, ...d, settings: { ...base.settings, ...obj(d.settings) }, quizzes: Array.isArray(d.quizzes) ? d.quizzes : [], attempts: Array.isArray(d.attempts) ? d.attempts : [], shuffleHistory: obj(d.shuffleHistory), bookmarks: obj(d.bookmarks), revision: obj(d.revision), revStats: { mastered: 0, ...obj(d.revStats) }, aiLog: obj(d.aiLog), notebook: { items: obj(obj(d.notebook).items) }, achSeen: Array.isArray(d.achSeen) ? d.achSeen : [], analyser: Array.isArray(d.analyser) ? d.analyser : [] };
   if (!Array.isArray(s.settings.aiKeys)) s.settings.aiKeys = [];
   // v2.4 → v2.5: single Gemini key becomes the first entry of the multi-key list
   if (s.settings.geminiKey && !s.settings.aiKeys.some(k => k.key === s.settings.geminiKey)) s.settings.aiKeys.push({ id: uid(), label: 'Key 1', key: s.settings.geminiKey, enabled: true, status: 'unknown' });
@@ -106,13 +106,13 @@ document.querySelector('#app').innerHTML = `
       <button class="navitem" data-tab="quizzes"><span>▤</span> My Quizzes <em id="quizCount">0</em></button>
       <button class="navitem" data-tab="create"><span>＋</span> Create Quiz</button>
       <button class="navitem" data-tab="revision"><span>↻</span> Revision <em id="revCount" class="hot" hidden>0</em></button>
-      <button class="navitem" data-tab="mistakes"><span>✎</span> Mistake Notebook</button>
-      <button class="navitem" data-tab="sections"><span>▦</span> Section Mode</button>
-      <button class="navitem" data-tab="achievements"><span>🏆</span> Achievements</button>
-      <button class="navitem" data-tab="predictor"><span>◈</span> Quizinox Predictor</button>
-      <button class="navitem" data-tab="analyser"><span>⌕</span> Quizinox Analyser</button>
       <button class="navitem" data-tab="search"><span>⌕</span> Question Search</button>
       <button class="navitem" data-tab="reports"><span>▥</span> Analytics</button>
+      <button class="navitem" data-tab="mocks"><span>◷</span> Mock &amp; Sections</button>
+      <button class="navitem" data-tab="notebook"><span>✎</span> Mistake Notebook</button>
+      <button class="navitem" data-tab="achievements"><span>🏆</span> Achievements</button>
+      <button class="navitem" data-tab="analyser"><span>🧠</span> Quizinox Analyser</button>
+      <button class="navitem" data-tab="predictor"><span>🎯</span> Quizinox Predictor</button>
       <button class="navitem" data-tab="ai"><span>✦</span> AI Studio</button>
       <button class="navitem" data-tab="tools"><span>⌘</span> File Studio</button>
       <button class="navitem" data-tab="settings"><span>⚙</span> Settings</button>
@@ -133,20 +133,20 @@ document.querySelector('#app').innerHTML = `
 `;
 
 const view = $('#view');
-const labels = { mistakes: 'Personal Mistake Notebook', sections: 'Section Mode', achievements: 'Achievements', predictor: 'Quizinox Predictor', analyser: 'Quizinox Analyser', home: 'Your learning space', quizzes: 'Your quiz library', create: 'Quiz studio', revision: 'Automatic revision', search: 'Question bank search', reports: 'Performance analytics', ai: 'AI study studio', tools: 'File studio', settings: 'Preferences' };
-const MORE_TABS = ['create', 'ai', 'tools', 'settings', 'mistakes', 'sections', 'achievements', 'predictor', 'analyser'];
+const labels = { home: 'Your learning space', quizzes: 'Your quiz library', create: 'Quiz studio', revision: 'Automatic revision', search: 'Question bank search', reports: 'Performance analytics', ai: 'AI study studio', tools: 'File studio', settings: 'Preferences', mocks: 'Mock tests & section tests', notebook: 'Personal mistake notebook', achievements: 'Your achievements', analyser: 'Quizinox Analyser', predictor: 'Quizinox Predictor' };
+const MORE_TABS = ['create', 'ai', 'tools', 'settings', 'mocks', 'notebook', 'achievements', 'analyser', 'predictor'];
 function markNav(tab) { $$('.navitem,.mobile-nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (b.hasAttribute('data-more') && MORE_TABS.includes(tab)))); }
 function scrollTop() { window.scrollTo(0, 0); $('.main')?.scrollTo?.(0, 0); }
 function setTab(tab) { if (play) return; db.activeTab = tab; save(); markNav(tab); $('#crumb').textContent = labels[tab] || 'QUIZINOX'; lastResult = null; render(); scrollTop(); }
 $('[data-more]').addEventListener('click', () => { if (play) return toast('Finish or exit the quiz first'); actionSheet('More', '', [
   { icon: '＋', label: 'Create quiz', hint: 'Build or paste questions', run: () => setTab('create') },
   { icon: '✦', label: 'AI Studio', hint: 'Analyst · tutor · question generator', cls: 'practice-icon', run: () => setTab('ai') },
-  { icon: '▦', label: 'Section Mode', hint: 'Build multi-section timed tests', run: () => setTab('sections') },
-  { icon: '🏆', label: 'Achievements', hint: 'XP, streaks and personal records', run: () => setTab('achievements') },
-  { icon: '✎', label: 'Mistake Notebook', hint: 'Wrong answers and mastered mistakes', run: () => setTab('mistakes') },
-  { icon: '◈', label: 'Quizinox Predictor', hint: 'Readiness and mistake analysis', run: () => setTab('predictor') },
-  { icon: '🧭', label: 'Quizinox Analyser', hint: 'Separate AI teacher and doubt solver', run: () => setTab('analyser') },
   { icon: '⌘', label: 'File Studio', hint: 'PDF → TXT, import, export, backup', run: () => setTab('tools') },
+  { icon: '◷', label: 'Mock & Section tests', hint: 'Full mock simulator · section mode', run: () => setTab('mocks') },
+  { icon: '✎', label: 'Mistake Notebook', hint: 'Wrong questions · mastered · mistake mocks', cls: 'practice-icon', run: () => setTab('notebook') },
+  { icon: '🏆', label: 'Achievements', hint: 'XP · streaks · badges · personal bests', run: () => setTab('achievements') },
+  { icon: '🧠', label: 'Quizinox Analyser', hint: 'AI teacher that knows your history', cls: 'practice-icon', run: () => setTab('analyser') },
+  { icon: '🎯', label: 'Quizinox Predictor', hint: 'Exam readiness score & range', run: () => setTab('predictor') },
   { icon: '⚙', label: 'Settings', hint: 'Profile, AI keys, languages, data', cls: 'practice-icon', run: () => setTab('settings') },
 ]); });
 $$('[data-tab]').forEach(b => b.addEventListener('click', () => { if (play) return toast('Finish or exit the quiz first'); setTab(b.dataset.tab); }));
@@ -160,7 +160,7 @@ window.addEventListener('online', () => { updateNet(); toast('Back online — AI
 window.addEventListener('offline', () => { updateNet(); toast('Offline — your quizzes keep working'); });
 updateNet();
 
-function render() { if (play) { renderPlayer(); return; } const tab = db.activeTab || 'home'; markNav(tab); ({ home, quizzes: library, create: () => creator(), revision: revisionPage, mistakes: mistakeNotebook, sections: sectionStudio, achievements: achievementsPage, predictor: predictorPage, analyser: analyserPage, search: searchPage, reports, ai: aiStudio, tools, settings }[tab] || home)(); }
+function render() { if (play) { renderPlayer(); return; } const tab = db.activeTab || 'home'; markNav(tab); ({ home, quizzes: library, create: () => creator(), revision: revisionPage, search: searchPage, reports, ai: aiStudio, tools, settings, mocks: () => lazyPage('mocks'), notebook: () => lazyPage('notebook'), achievements: () => lazyPage('achievements'), analyser: () => lazyPage('analyser'), predictor: () => lazyPage('predictor') }[tab] || home)(); }
 
 /* ------------------------------ HOME ------------------------------ */
 function home() {
@@ -187,8 +187,8 @@ function quizMenu(id) {
     { icon: '▶', label: 'Play quiz', hint: 'Exam or practice mode', run: () => chooseMode(q.id) },
     { icon: '✎', label: 'Edit quiz', cls: 'practice-icon', run: () => editQuiz(q.id) },
     { icon: '⧉', label: 'Duplicate', run: () => { const c = structuredClone(q); c.id = uid(); c.title += ' (Copy)'; c.updatedAt = new Date().toISOString(); db.quizzes.unshift(c); save(); render(); toast('Quiz duplicated'); } },
-    { icon: '📚', label: 'Extract Notes', hint: 'Generate HTML in your uploaded Notes Generator format', run: () => extractQuizNotes(q) },
     { icon: '⇩', label: 'Export', hint: 'JSON, TXT (😂 format) or PDF', run: () => exportQuiz(q) },
+    { icon: '📝', label: 'Extract notes', hint: 'Study-notes HTML in Notes Generator format', run: () => extractNotes(q) },
     { icon: '🌐', label: 'Translate · 100+ languages', hint: 'Online · bulk translation · no Gemini key', run: () => translateQuiz(q) },
     { icon: '×', label: 'Delete', danger: true, cls: 'danger-icon', run: async () => { if (await confirmBox('Delete quiz?', `"${q.title}" will be removed from this device.`, 'Delete', true)) { db.quizzes = db.quizzes.filter(x => x.id !== q.id); save(); render(); toast('Quiz deleted'); } } },
   ]);
@@ -258,10 +258,8 @@ function editQuiz(id) { db.activeTab = 'create'; markNav('create'); $('#crumb').
 function chooseMode(id) {
   const q = db.quizzes.find(x => x.id === id); if (!q || !q.questions.length) return toast('This quiz has no questions');
   const saved = savedPlay(); const canResume = saved && saved.quiz?.id === id && !saved.quiz?.isRevision;
-  const { el, close } = modal(`<div class="eyebrow">CHOOSE YOUR EXPERIENCE</div><h2>${esc(q.title)}</h2><p>${q.questions.length} questions${q.settings.timer ? ` · ${q.settings.timer}s per question` : ''}${q.settings.negative ? ` · −${q.settings.negative} negative` : ''}</p>${canResume ? `<button class="mode-choice resume-choice" data-mode="resume"><span class="mode-icon practice-icon">⏯</span><span><b>Resume from Q${(saved.index || 0) + 1}</b><small>${Object.keys(saved.answers || {}).length}/${saved.questions.length} answered${saved.lastAnswered != null ? ` · last answered Q${saved.lastAnswered + 1}` : ''} · ${saved.mode === 'exam' ? 'Exam' : 'Practice'} mode</small></span><span class="mode-arrow">→</span></button>` : ''}<button class="mode-choice" data-mode="exam"><span class="mode-icon exam-icon">◷</span><span><b>Exam mode</b><small>Attempt freely, jump between questions, mark for review. Score and full review at the end.</small></span><span class="mode-arrow">→</span></button><button class="mode-choice" data-mode="practice"><span class="mode-icon practice-icon">✦</span><span><b>Practice mode</b><small>See the correct answer and explanation right after each response.</small></span><span class="mode-arrow">→</span></button>
-  <button class="mode-choice" data-mode="omr"><span class="mode-icon exam-icon">◉</span><span><b>OMR Mode</b><small>Bubble-sheet interface · answer all questions · submit for evaluation.</small></span><span class="mode-arrow">→</span></button>
-  <button class="mode-choice" data-mode="fullmock"><span class="mode-icon exam-icon">⏱</span><span><b>Full Mock Simulator</b><small>Choose total duration, question count, negative marking and Exam / Practice mode.</small></span><span class="mode-arrow">→</span></button>`);
-  $$('[data-mode]', el).forEach(b => b.onclick = () => { const mode = b.dataset.mode; close(); if (mode === 'resume') return resumeQuiz(); if (mode === 'omr') return configureOMR(id); if (mode === 'fullmock') return configureFullMock(id); chooseShuffle(id, mode); });
+  const { el, close } = modal(`<div class="eyebrow">CHOOSE YOUR EXPERIENCE</div><h2>${esc(q.title)}</h2><p>${q.questions.length} questions${q.settings.timer ? ` · ${q.settings.timer}s per question` : ''}${q.settings.negative ? ` · −${q.settings.negative} negative` : ''}${q.sections?.length ? ` · ${q.sections.length} section${q.sections.length > 1 ? 's' : ''}` : ''}</p>${canResume ? `<button class="mode-choice resume-choice" data-mode="resume"><span class="mode-icon practice-icon">⏯</span><span><b>Resume from Q${(saved.index || 0) + 1}</b><small>${Object.keys(saved.answers || {}).length}/${saved.questions.length} answered${saved.lastAnswered != null ? ` · last answered Q${saved.lastAnswered + 1}` : ''} · ${saved.mode === 'exam' ? 'Exam' : saved.mode === 'omr' ? 'OMR' : 'Practice'} mode</small></span><span class="mode-arrow">→</span></button>` : ''}<button class="mode-choice" data-mode="exam"><span class="mode-icon exam-icon">◷</span><span><b>Exam mode</b><small>Attempt freely, jump between questions, mark for review. Score and full review at the end.</small></span><span class="mode-arrow">→</span></button><button class="mode-choice" data-mode="practice"><span class="mode-icon practice-icon">✦</span><span><b>Practice mode</b><small>See the correct answer and explanation right after each response.</small></span><span class="mode-arrow">→</span></button><button class="mode-choice" data-mode="omr"><span class="mode-icon omr-icon">▦</span><span><b>OMR mode</b><small>Real OMR answer sheet (100 / 150 / 200 questions) — fill A/B/C/D bubbles, auto-evaluated on submit. UPSC Prelims simulation.</small></span><span class="mode-arrow">→</span></button>`);
+  $$('[data-mode]', el).forEach(b => b.onclick = () => { const mode = b.dataset.mode; close(); if (mode === 'resume') return resumeQuiz(); if (mode === 'omr') return omrSetup(id); chooseShuffle(id, mode); });
 }
 function chooseShuffle(id, mode) {
   const q = db.quizzes.find(x => x.id === id); if (!q) return;
@@ -282,7 +280,7 @@ function buildAttemptOrder(quiz, kind) {
   const history = db.shuffleHistory[historyKey] || [];
   const make = () => {
     let qs = quiz.questions.map(x => ({ ...x, id: x.id || uid(), options: x.options.map((t, i) => ({ text: t, original: i })) }));
-    if (shuffleQ) shuffle(qs);
+    if (shuffleQ) { if (quiz.sections?.length) shuffleWithinSections(qs, quiz.sections); else shuffle(qs); }
     if (shuffleO) qs.forEach(x => shuffle(x.options));
     const raw = JSON.stringify({ q: shuffleQ ? qs.map(x => x.id) : [], o: shuffleO ? qs.map(x => [x.id, x.options.map(o => o.original)]) : [] });
     let h1 = 2166136261, h2 = 2246822519; for (let i = 0; i < raw.length; i++) { const c = raw.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 ^ c, 3266489917); }
@@ -306,23 +304,22 @@ function initialLangs(q) {
   if (missing.length && want[0] !== 'original') setTimeout(() => toast(`${missing.map(languageLabel).join(', ')} not translated for this quiz yet — tap 🌐 to translate`, 4200), 400);
   return langs.length ? langs : ['original'];
 }
-function startQuiz(id, mode = 'exam', shuffleKind = 'none', quizObj = null, config = {}) {
+function startQuiz(id, mode = 'exam', shuffleKind = 'none', quizObj = null) {
   const q = quizObj || db.quizzes.find(x => x.id === id); if (!q || !q.questions.length) return toast('This quiz has no questions');
-  let qs = q.isRevision ? shuffle(q.questions.map(x => ({ ...x, options: x.options.map((t, i) => ({ text: t, original: i })) }))) : buildAttemptOrder(q, shuffleKind);
-  if (config.count && config.count < qs.length) qs = config.random ? shuffle(qs).slice(0, config.count) : qs.slice(0, config.count);
+  const qs = q.isRevision ? shuffle(q.questions.map(x => ({ ...x, options: x.options.map((t, i) => ({ text: t, original: i })) }))) : buildAttemptOrder(q, shuffleKind);
   const langs = initialLangs(q);
-  play = { quiz: q, mode, shuffleKind, questions: qs, totalDuration: config.duration || 0, remainingTotal: config.duration || 0, sectionMeta: config.sectionMeta || null, sectionIndex: 0, remainingSection: config.sectionMeta?.[0]?.seconds || 0, omr: mode === 'omr', index: 0, answers: {}, marked: {}, visited: { 0: true }, timeLeft: {}, qTime: {}, qEnter: Date.now(), lastAnswered: null, langs, langMode: langs.length > 1 ? (db.settings.langMode || 'single') : 'single', started: Date.now(), interval: null, finished: false, paletteOpen: false };
-  enterPlayer();
+  play = { quiz: q, mode, shuffleKind, questions: qs, index: 0, answers: {}, marked: {}, visited: { 0: true }, timeLeft: {}, qTime: {}, qEnter: Date.now(), lastAnswered: null, langs, langMode: langs.length > 1 ? (db.settings.langMode || 'single') : 'single', started: Date.now(), interval: null, finished: false, paletteOpen: false };
+  setupClock(play); enterPlayer();
 }
 function resumeQuiz() {
   try {
-    const s = savedPlay(); const q = (s.quiz?.isRevision || s.totalDuration || s.sectionMeta) ? s.quiz : db.quizzes.find(x => x.id === s.quiz.id); if (!q) throw 0;
-    play = { ...s, quiz: q, interval: null, qEnter: Date.now(), away: false, qTime: s.qTime || {}, langs: s.langs || ['original'], langMode: s.langMode || 'single' };
+    const s = savedPlay(); const q = s.quiz?.isRevision ? s.quiz : db.quizzes.find(x => x.id === s.quiz.id); if (!q) throw 0;
+    play = { ...s, quiz: q, interval: null, clockIv: null, qEnter: Date.now(), away: false, qTime: s.qTime || {}, langs: s.langs || ['original'], langMode: s.langMode || 'single' };
     enterPlayer(); toast(`Attempt resumed at Q${play.index + 1}`);
   } catch { Store.removeItem(PLAY_STORE); toast('Could not resume that attempt'); }
 }
-function enterPlayer() { document.body.classList.add('in-quiz'); markNav(''); renderPlayer(); scrollTop(); }
-function leavePlayer() { if (play) clearInterval(play.interval); play = null; Store.removeItem(PLAY_STORE); document.body.classList.remove('in-quiz'); }
+function enterPlayer() { document.body.classList.add('in-quiz'); markNav(''); renderPlayer(); startClock(); scrollTop(); }
+function leavePlayer() { if (play) { clearInterval(play.interval); clearInterval(play.clockIv); } play = null; Store.removeItem(PLAY_STORE); document.body.classList.remove('in-quiz'); }
 const answeredCount = p => Object.keys(p.answers).filter(k => p.answers[k] != null).length;
 function qState(p, i) { const a = p.answers[i] != null, m = !!p.marked[i]; if (p.mode === 'practice' && a) return p.answers[i] === p.questions[i].correct ? 'right' : 'wrongq'; if (a && m) return 'ans-marked'; if (m) return 'marked'; if (a) return 'answered'; if (p.visited[i]) return 'skipped'; return 'fresh'; }
 const tMapCache = new WeakMap();
@@ -343,12 +340,12 @@ function activeLangs(p) { const l = p.langs?.length ? p.langs : ['original']; re
 /** Plain snapshot (original option order) used by bookmarks, revision and the AI tutor. */
 function snapFromPlay(p, q) { return { text: q.text, options: q.options.slice().sort((a, b) => a.original - b.original).map(o => o.text), correct: q.correct, explanation: q.explanation || '', topic: q.topic || '', subject: q.subject || p.quiz.subject || 'General', quizId: p.quiz.isRevision ? (q.quizId || '') : p.quiz.id, quizTitle: p.quiz.isRevision ? (q.quizTitle || '') : p.quiz.title, qid: q.qid || q.id, selected: p.answers[p.index] ?? null }; }
 function renderPlayer() {
-  const p = play; if (!p) return; if (p.omr) return renderOMRPlayer(); const q = p.questions[p.index]; if (!q) return finishQuiz();
+  const p = play; if (!p) return; if (p.mode === 'omr') return renderOmr(); const q = p.questions[p.index]; if (!q) return finishQuiz();
   p.visited[p.index] = true; if (!p.qEnter) p.qEnter = Date.now();
   const sel = p.answers[p.index]; const answered = sel != null; const locked = p.mode === 'practice' && answered;
   const isRight = answered && sel === q.correct;
   const timer = p.quiz.settings.timer || 0; if (timer && p.timeLeft[p.index] == null) p.timeLeft[p.index] = timer;
-  const done = answeredCount(p), total = p.questions.length, last = p.index === total - 1;
+  const done = answeredCount(p), total = p.questions.length, [lo, hi] = secRange(p), last = p.index === hi - 1, moreSec = !!p.sections && p.secTiming === 'section' && p.secIdx < p.sections.length - 1;
   const langs = activeLangs(p), multi = langs.length > 1, views = langs.map(c => ({ c, v: qView(p.quiz, q, c) }));
   const tag = c => multi ? `<span class="ml-tag">${esc(langShort(c))}</span>` : '';
   const qHtml = multi ? views.map(({ c, v }) => `<div class="ml-block">${tag(c)}<div>${escMl(v.text)}</div></div>`).join('') : escMl(views[0].v.text);
@@ -358,17 +355,17 @@ function renderPlayer() {
   const bm = isBookmarkedText(q.text);
   const feedback = locked ? `<div class="instant-feedback ${isRight ? 'is-correct' : 'is-wrong'}"><b>${isRight ? '✓ Correct answer' : '✕ Not quite — learn from it'}</b><div>Correct answer: <strong>${L(rightIdx)}. ${esc(views[0].v.opt(q.correct) || 'Not specified')}</strong></div>${explHtml}<div class="feedback-actions"><button class="secondary" id="askAiNow">✦ Ask AI tutor</button>${!isRight && !bm ? '<button class="textbtn" id="bmNow">⚐ Save as difficult</button>' : ''}</div></div>` : '';
   const slide = p.slideDir ? (p.slideDir > 0 ? 'slide-left' : 'slide-right') : ''; p.slideDir = 0;
-  const unanswered = p.questions.findIndex((_, i) => i > p.index && p.answers[i] == null);
-  view.innerHTML = `<div class="player-wrap"><div class="player-top"><button class="secondary" id="quitPlay">← Exit</button><span class="tag">${p.sectionMeta ? `SECTION ${p.sectionIndex+1}/${p.sectionMeta.length} · ${esc(p.sectionMeta[p.sectionIndex]?.name||'')}` : p.totalDuration ? `FULL MOCK · ${p.mode.toUpperCase()}` : p.quiz.isRevision ? 'REVISION' : p.mode === 'exam' ? 'EXAM MODE' : 'PRACTICE MODE'}</span><div class="player-top-actions"><button class="secondary" id="playerTranslate" title="Language (L)">🌐 ${esc(langs.map(c => c === 'original' ? 'Original' : languageLabel(c)).join(' + '))}</button>${(p.langs || []).length > 1 ? `<button class="secondary" id="langToggle" title="Switch single / bilingual">${multi ? '1 language' : 'Bilingual'}</button>` : ''}<button class="secondary kbd-btn" id="kbdHelp" title="Keyboard shortcuts (?)">⌨</button><button class="secondary palette-toggle" id="paletteToggle">☷ ${p.index + 1}/${total}</button></div></div>
+  const unanswered = p.questions.findIndex((_, i) => i > p.index && i < hi && p.answers[i] == null);
+  view.innerHTML = `<div class="player-wrap"><div class="player-top"><button class="secondary" id="quitPlay">← Exit</button><span class="tag">${p.quiz.isRevision ? 'REVISION' : p.mode === 'exam' ? 'EXAM MODE' : 'PRACTICE MODE'}</span>${headBits(p)}<div class="player-top-actions"><button class="secondary" id="playerTranslate" title="Language (L)">🌐 ${esc(langs.map(c => c === 'original' ? 'Original' : languageLabel(c)).join(' + '))}</button>${(p.langs || []).length > 1 ? `<button class="secondary" id="langToggle" title="Switch single / bilingual">${multi ? '1 language' : 'Bilingual'}</button>` : ''}<button class="secondary kbd-btn" id="kbdHelp" title="Keyboard shortcuts (?)">⌨</button><button class="secondary palette-toggle" id="paletteToggle">☷ ${p.index + 1}/${total}</button></div></div>
   <div class="progress"><i style="width:${Math.round(done / total * 100)}%"></i></div>
   <div class="player-grid ${p.paletteOpen ? 'palette-open' : ''}">
-   <div class="player-card ${slide}"><div class="question-meta"><span>QUESTION ${String(p.index + 1).padStart(2, '0')} OF ${total}${q.topic ? ` · ${esc(q.topic)}` : ''}</span><span class="timer ${timer && p.timeLeft[p.index] <= 5 ? 'timer-low' : ''}" id="timerDisplay">${p.sectionMeta ? `◷ ${fmtDur(p.remainingSection)} · ${esc(p.sectionMeta[p.sectionIndex]?.name||'Section')}` : p.totalDuration ? `◷ ${fmtDur(p.remainingTotal)} remaining` : timer ? `◷ ${p.timeLeft[p.index]}s` : esc(q.subject || p.quiz.subject || 'General')}</span></div><h1 class="${multi ? 'multi' : ''}">${qHtml}</h1><div class="answer-list">${q.options.map((o, i) => `<button class="answer ${sel === o.original ? 'chosen' : ''} ${locked ? (o.original === q.correct ? 'answer-correct' : o.original === sel ? 'answer-wrong' : '') : ''}" data-answer="${o.original}" ${locked ? 'disabled' : ''}><span class="letter">${L(i)}</span>${optHtml(o)}<span class="radio"></span></button>`).join('')}</div>${feedback}
+   <div class="player-card ${slide}"><div class="question-meta"><span>QUESTION ${String(p.index + 1).padStart(2, '0')} OF ${total}${q.topic ? ` · ${esc(q.topic)}` : ''}</span><span class="timer ${timer && p.timeLeft[p.index] <= 5 ? 'timer-low' : ''}" id="timerDisplay">${timer ? `◷ ${p.timeLeft[p.index]}s` : esc(q.subject || p.quiz.subject || 'General')}</span></div><h1 class="${multi ? 'multi' : ''}">${qHtml}</h1><div class="answer-list">${q.options.map((o, i) => `<button class="answer ${sel === o.original ? 'chosen' : ''} ${locked ? (o.original === q.correct ? 'answer-correct' : o.original === sel ? 'answer-wrong' : '') : ''}" data-answer="${o.original}" ${locked ? 'disabled' : ''}><span class="letter">${L(i)}</span>${optHtml(o)}<span class="radio"></span></button>`).join('')}</div>${feedback}
     <div class="player-tools">${p.mode === 'exam' ? `<button class="textbtn" id="markReview">${p.marked[p.index] ? '★ Marked for review' : '☆ Mark for review'}</button>` : ''}<button class="textbtn ${bm ? 'bm-on' : ''}" id="bookmarkQ">${bm ? '⚑ Saved as difficult' : '⚐ Bookmark difficult'}</button>${answered && !locked ? '<button class="textbtn" id="clearAns">⟲ Clear response</button>' : ''}</div>
-    <div class="player-bottom"><button class="secondary" id="prevQuestion" ${p.index === 0 ? 'disabled' : ''}>← Previous</button><span class="muted">${done}/${total} answered</span>${last ? '<button class="primary" id="submitQuiz">Submit ✓</button>' : '<button class="primary" id="nextQuestion">Next →</button>'}</div>
+    <div class="player-bottom"><button class="secondary" id="prevQuestion" ${p.index === lo ? 'disabled' : ''}>← Previous</button><span class="muted">${done}/${total} answered</span>${last ? (moreSec ? '<button class="primary" id="nextSection">Next section →</button>' : '<button class="primary" id="submitQuiz">Submit ✓</button>') : '<button class="primary" id="nextQuestion">Next →</button>'}</div>
    </div>
    <aside class="palette panel"><div class="panel-head"><div><h3>Question palette</h3><p>Tap any number to jump</p></div><button class="textbtn palette-close" id="paletteClose">×</button></div>
     <div class="jump-row"><input id="jumpTo" type="number" min="1" max="${total}" placeholder="Go to Q#"/><button class="secondary" id="jumpGo">Go</button><button class="secondary" id="jumpNextBlank" ${unanswered < 0 ? 'disabled' : ''} title="Next unanswered (U)">Next blank</button></div>
-    <div class="palette-grid">${p.questions.map((x, i) => `<button class="pal ${qState(p, i)} ${i === p.index ? 'current' : ''} ${isBookmarkedText(x.text) ? 'bm' : ''}" data-jump="${i}">${i + 1}</button>`).join('')}</div>
+    <div class="palette-grid">${p.questions.map((x, i) => (i < lo || i >= hi) ? '' : `<button class="pal ${qState(p, i)} ${i === p.index ? 'current' : ''} ${isBookmarkedText(x.text) ? 'bm' : ''}" data-jump="${i}">${i + 1}</button>`).join('')}</div>
     <div class="legend">${p.mode === 'exam' ? '<span><i class="answered"></i>Answered</span><span><i class="skipped"></i>Not answered</span><span><i class="marked"></i>Marked</span><span><i class="ans-marked"></i>Answered + marked</span><span><i class="fresh"></i>Not visited</span><span><i class="bmk"></i>Bookmarked</span>' : '<span><i class="right"></i>Correct</span><span><i class="wrongq"></i>Wrong</span><span><i class="skipped"></i>Skipped</span><span><i class="fresh"></i>Not visited</span><span><i class="bmk"></i>Bookmarked</span>'}</div>
     <button class="primary full" id="submitSide">Submit quiz</button></aside>
   </div>
@@ -381,6 +378,7 @@ function renderPlayer() {
   $('#prevQuestion').onclick = () => go(p.index - 1);
   $('#nextQuestion')?.addEventListener('click', () => go(p.index + 1));
   $('#submitQuiz')?.addEventListener('click', submitQuiz); $('#submitSide').onclick = submitQuiz;
+  $('#nextSection')?.addEventListener('click', async () => { if (await confirmBox('Move to the next section?', 'You will not be able to return to this section.', 'Next section')) advanceSection(false); });
   $('#markReview')?.addEventListener('click', toggleMark);
   $('#bookmarkQ').onclick = () => { toggleBookmark(snapFromPlay(p, q)); renderPlayer(); };
   $('#bmNow')?.addEventListener('click', () => { toggleBookmark(snapFromPlay(p, q)); renderPlayer(); });
@@ -406,25 +404,16 @@ function renderPlayer() {
   } else if (timer && !locked && p.timeLeft[p.index] <= 0) {
     $$('.answer').forEach(b => b.disabled = true); const t = $('#timerDisplay'); if (t) t.textContent = '◷ Time up';
   }
-  if (p.totalDuration || p.sectionMeta) {
-    clearInterval(p.interval);
-    p.interval=setInterval(()=>{
-      const now=Date.now(); p._clockAt ||= now; const delta=Math.max(0,Math.floor((now-p._clockAt)/1000)); if(!delta)return; p._clockAt=now;
-      if(p.sectionMeta){p.remainingSection=Math.max(0,(p.remainingSection||0)-delta);const m=p.sectionMeta[p.sectionIndex];const t=$('#timerDisplay');if(t)t.textContent=`◷ ${fmtDur(p.remainingSection)} · ${m?.name||'Section'}`;if(p.remainingSection<=0){clearInterval(p.interval);if(p.sectionIndex<p.sectionMeta.length-1){p.sectionIndex++;const next=p.sectionMeta[p.sectionIndex];p.remainingSection=next.seconds;p.index=next.start;p._clockAt=Date.now();savePlay();renderPlayer();toast(`${next.name} section started`);}else{toast('All section timers completed');finishQuiz();}}}
-      else {p.remainingTotal=Math.max(0,p.remainingTotal-delta);const t=$('#timerDisplay');if(t)t.textContent=`◷ ${fmtDur(p.remainingTotal)} remaining`;if(p.remainingTotal<=0){clearInterval(p.interval);toast('Mock test time is over — submitting automatically');finishQuiz();}}
-      if(p && (p.sectionMeta ? p.remainingSection : p.remainingTotal)%10===0)savePlay();
-    },500);
-  }
 }
 function selectAnswer(orig) { const p = play; if (!p) return; p.answers[p.index] = orig; p.lastAnswered = p.index; savePlay(); renderPlayer(); }
 function clearAnswer() { const p = play; if (!p || p.answers[p.index] == null || (p.mode === 'practice')) return; delete p.answers[p.index]; savePlay(); renderPlayer(); }
 function toggleMark() { const p = play; if (!p || p.mode !== 'exam') return; p.marked[p.index] = !p.marked[p.index]; savePlay(); renderPlayer(); }
-function nextUnanswered() { const p = play; if (!p) return; const n = p.questions.length; for (let k = 1; k <= n; k++) { const i = (p.index + k) % n; if (p.answers[i] == null) return go(i); } toast('All questions are answered'); }
-function swipeGo(dir) { const p = play; if (!p) return; const i = p.index + dir; if (i < 0) return toast('This is the first question'); if (i >= p.questions.length) return toast('Last question — tap Submit when ready'); p.slideDir = dir; go(i); }
+function nextUnanswered() { const p = play; if (!p) return; const [lo, hi] = secRange(p), n = hi - lo; for (let k = 1; k <= n; k++) { const i = lo + ((p.index - lo + k) % n); if (p.answers[i] == null) return go(i); } toast('All questions are answered'); }
+function swipeGo(dir) { const p = play; if (!p) return; const i = p.index + dir, [lo, hi] = secRange(p); if (i < lo) return toast('This is the first question'); if (i >= hi) return toast(p.sections && p.secTiming === 'section' && p.secIdx < p.sections.length - 1 ? 'Last question of this section — tap “Next section”' : 'Last question — tap Submit when ready'); p.slideDir = dir; go(i); }
 async function exitPlayerPrompt() {
   const p = play; if (!p) return;
   const r = await confirmBox('Exit quiz?', 'Choose "Save & exit" to resume later from the same question.', 'Save & exit');
-  if (r && play === p) { clearInterval(p.interval); savePlay(); const t = db.activeTab; play = null; document.body.classList.remove('in-quiz'); setTab(t === 'create' ? 'quizzes' : 'home'); }
+  if (r && play === p) { clearInterval(p.interval); clearInterval(p.clockIv); savePlay(); const t = db.activeTab; play = null; document.body.classList.remove('in-quiz'); setTab(t === 'create' ? 'quizzes' : 'home'); }
 }
 function showShortcuts() {
   const rows = [['← / →', 'Previous / next question'], ['Enter / Space', 'Next question (submit on the last one)'], ['1–8 or A–E', 'Choose that option'], ['X', 'Clear response (exam mode)'], ['M', 'Mark for review (exam mode)'], ['F', 'Bookmark as difficult'], ['G', 'Jump to a question number'], ['U', 'Next unanswered question'], ['Home / End', 'First / last question'], ['T', 'Show / hide palette'], ['L', 'Change language'], ['I', 'Ask AI tutor (after the answer is shown)'], ['S', 'Submit quiz'], ['Esc', 'Close dialog / exit quiz'], ['?', 'This help']];
@@ -437,21 +426,23 @@ function jumpPrompt() {
   const ok = () => { const n = Number(inp.value); if (n >= 1 && n <= total) { close(); go(n - 1); } else toast(`Enter 1 to ${total}`); };
   $('#jumpOk', el).onclick = ok; inp.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
 }
-function go(i) { if (!play) return; if (play.sectionMeta) { const m=play.sectionMeta[play.sectionIndex]; if(i===m.end+1 && play.sectionIndex<play.sectionMeta.length-1){play.sectionIndex++;const nx=play.sectionMeta[play.sectionIndex];play.remainingSection=nx.seconds;play._clockAt=Date.now();i=nx.start;toast(`${nx.name} section started`);} if(i<m.start||i>m.end)return toast('This section is locked to its own question range'); } if (i < 0 || i >= play.questions.length) return; clearInterval(play.interval); tickTime(play); play.index = i; savePlay(); renderPlayer(); window.scrollTo({ top: 0, behavior: 'smooth' }); $('.main')?.scrollTo?.({ top: 0, behavior: 'smooth' }); }
+function go(i) { if (!play) return; if (i < 0 || i >= play.questions.length) return; { const [lo, hi] = secRange(play); if (i < lo || i >= hi) return toast('That question belongs to another section'); } clearInterval(play.interval); tickTime(play); play.index = i; savePlay(); renderPlayer(); window.scrollTo({ top: 0, behavior: 'smooth' }); $('.main')?.scrollTo?.({ top: 0, behavior: 'smooth' }); }
 async function submitQuiz() {
   const p = play; if (!p) return; const left = p.questions.length - answeredCount(p); const marked = Object.values(p.marked).filter(Boolean).length;
   const msg = left || marked ? `${left ? `${left} unanswered` : ''}${left && marked ? ' · ' : ''}${marked ? `${marked} marked for review` : ''}. Submit anyway?` : 'All questions answered. Submit your attempt?';
   if (await confirmBox('Submit quiz?', msg, 'Submit')) finishQuiz();
 }
 function finishQuiz() {
-  const p = play; if (!p) return; clearInterval(p.interval); tickTime(p); p.finished = true;
+  const p = play; if (!p) return; clearInterval(p.interval); clearInterval(p.clockIv); $$('.mode-overlay').forEach(o => o.remove()); tickTime(p); p.finished = true;
   let correct = 0, wrong = 0, blank = 0, score = 0; const neg = Number(p.quiz.settings.negative) || 0; const subject = p.quiz.subject || 'General';
   const details = p.questions.map((q, i) => { const ans = p.answers[i]; let status = 'blank'; if (ans == null) blank++; else if (ans === q.correct) { correct++; score++; status = 'correct'; } else { wrong++; score -= neg; status = 'wrong'; } return { qid: q.qid || q.id, question: q.text, selected: ans ?? null, correct: q.correct, status, explanation: q.explanation, options: q.options, topic: q.topic || '', subject: q.subject || subject, timeSec: Math.round((p.qTime?.[i] || 0) / 1000), revKey: q.revKey || null, quizId: q.quizId || null }; });
   const max = p.questions.length, percent = Math.max(0, Math.round(score / max * 100));
-  const attempt = { id: uid(), quizId: p.quiz.id, quizTitle: p.quiz.title, subject, mode: p.mode, simulator: !!p.totalDuration, date: new Date().toISOString(), durationSec: Math.round((Date.now() - p.started) / 1000), total: max, correct, wrong, blank, score: Number(score.toFixed(2)), percent, pass: p.quiz.settings.pass ?? 40, negative: neg, details };
-  if (p.quiz.isRevision) { attempt.isRevision = true; attempt.revisionSummary = applyRevisionResults(details); save(); leavePlayer(); renderResult(attempt); return; }
+  const attempt = { id: uid(), quizId: p.quiz.id, quizTitle: p.quiz.title, subject, mode: p.mode, date: new Date().toISOString(), durationSec: Math.round((Date.now() - p.started) / 1000), total: max, correct, wrong, blank, score: Number(score.toFixed(2)), percent, pass: p.quiz.settings.pass ?? 40, negative: neg, details };
+  if (p.sections) attempt.sections = p.sections.map(sc => { const ds = details.slice(sc.start, sc.end), c = ds.filter(d => d.status === 'correct').length, w = ds.filter(d => d.status === 'wrong').length; return { name: sc.name, total: ds.length, correct: c, wrong: w, blank: ds.length - c - w, score: Number((c - w * neg).toFixed(2)), minutes: sc.minutes }; });
+  if (p.mode === 'omr') attempt.omr = true;
+  if (p.quiz.isRevision) { attempt.isRevision = true; collectMistakes(attempt); attempt.revisionSummary = applyRevisionResults(details); save(); leavePlayer(); renderResult(attempt); return; }
   attempt.revisionAdded = addWrongToRevision(p.quiz, details);
-  db.mistakeNotebook ||= {}; details.filter(d => d.status === 'wrong').forEach(d => { const k = `${d.quizId || p.quiz.id}:${d.qid || d.question}`; const old = db.mistakeNotebook[k]; db.mistakeNotebook[k] = { ...d, key:k, quizTitle:p.quiz.title, quizId:p.quiz.id, occurrences:(old?.occurrences||0)+1, lastWrong:Date.now(), mastered:false }; });
+  collectMistakes(attempt);
   db.attempts.unshift(attempt); save(); leavePlayer(); renderResult(attempt);
 }
 const fmtDur = s => s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : `${Math.floor(s / 60)}m ${s % 60}s`;
@@ -462,13 +453,13 @@ function renderResult(a, filter = 'all') {
   const rows = a.details.map((d, i) => ({ d, i })).filter(({ d }) => filter === 'all' || d.status === filter);
   view.innerHTML = `<div class="result-wrap"><div class="result-hero"><div class="result-ring" style="--score:${a.percent * 3.6}deg"><div><strong>${a.percent}%</strong><small>SCORE</small></div></div><div><div class="eyebrow">${passed ? '🏆 PASSED' : 'SESSION COMPLETE'}</div><h1>${passed ? 'Great work!' : 'Quiz completed!'}</h1><p>${esc(a.quizTitle)} · ${new Date(a.date).toLocaleString()}${a.durationSec ? ` · ${fmtDur(a.durationSec)}` : ''}</p></div></div>
   <div class="stats-grid result-stats"><div class="stat-card"><small>CORRECT</small><strong class="green-text">${a.correct}</strong></div><div class="stat-card"><small>INCORRECT</small><strong class="red-text">${a.wrong}</strong></div><div class="stat-card"><small>UNANSWERED</small><strong>${a.blank}</strong></div><div class="stat-card"><small>MARKS</small><strong>${a.score}/${a.total}</strong></div></div>
-  ${perfPanel(a)}
+  ${attemptCard(a)}${sectionTable(a)}${perfPanel(a)}
   <div class="panel artifact-panel" ${a.isRevision ? 'hidden' : ''}><div class="panel-head"><div><h3>🌐 Language & study exports</h3><p>Choose a language, then download or share each generated file directly.</p></div></div><div class="form-grid"><label>Export language<select id="artifactLang"><option value="original">Original</option></select></label><label>Translate into<select id="artifactTarget"></select></label></div><div class="dialog-actions"><button class="secondary" id="artifactTranslate">🌐 Translate / prepare language</button></div><div class="artifact-grid"><div class="artifact-item"><b>🎮 Playable HTML Quiz</b><div><button class="primary" id="downloadQuizHtml">⬇ Download HTML</button><button class="secondary" id="shareQuizHtml">↗ Share</button></div></div><div class="artifact-item"><b>📄 Test PDF</b><div><button class="primary" id="downloadTestPdf">⬇ Download PDF</button><button class="secondary" id="shareTestPdf">↗ Share</button></div></div><div class="artifact-item"><b>✅ Solution PDF</b><div><button class="primary" id="downloadSolPdf">⬇ Download PDF</button><button class="secondary" id="shareSolPdf">↗ Share</button></div></div><div class="artifact-item"><b>📚 Test + Solution PDF</b><div><button class="primary" id="downloadMergedPdf">⬇ Download PDF</button><button class="secondary" id="shareMergedPdf">↗ Share</button></div></div><div class="artifact-item"><b>📝 Notes HTML</b><div><button class="primary" id="downloadNotesHtml">⬇ Download HTML</button><button class="secondary" id="shareNotesHtml">↗ Share</button></div></div><div class="artifact-item"><b>📘 Notes PDF</b><div><button class="primary" id="downloadNotesPdf">⬇ Download PDF</button><button class="secondary" id="shareNotesPdf">↗ Share</button></div></div></div><p class="muted" id="artifactStatus">Files are saved to Downloads on web, or shared through Android's share sheet.</p><div class="dialog-actions"><button class="secondary" id="openTestMaker">Open supplied Test Series Maker</button><button class="secondary" id="openNotesMaker">Open supplied Notes Maker</button><button class="secondary" id="openQuizMaker">Open supplied Quiz Maker</button><button class="secondary" id="openTranslatorTool">Open supplied Translator</button></div></div>
-    ${a.isRevision ? '' : `<div class="attempt-split"><div class="eyebrow">NEW QUIZ FROM THIS ATTEMPT</div><div class="attempt-split-btns">${a.wrong ? `<button class="attempt-btn attempt-mistakes" id="attemptMistakes"><b>✎ ATTEMPT MISTAKES</b><small>${a.wrong} wrong question${a.wrong > 1 ? 's' : ''} as a new quiz</small></button>` : ''}${a.correct ? `<button class="attempt-btn attempt-correct" id="attemptCorrect"><b>✓ ATTEMPT CORRECT</b><small>${a.correct} correct question${a.correct > 1 ? 's' : ''} as a new quiz</small></button>` : ''}${a.wrong ? `<button class="attempt-btn" id="wrongWrite"><b>✍ WRONG WRITE</b><small>Write the correct answer for each mistake</small></button>` : ''}</div></div>`}
   <div class="panel"><div class="panel-head"><div><h3>Answer review</h3><p>Review every response and explanation.</p></div><button class="secondary" id="resultPdf">⇩ PDF report</button></div>
   <div class="chips">${[['all', 'All', a.total], ['correct', 'Correct', a.correct], ['wrong', 'Wrong', a.wrong], ['blank', 'Unanswered', a.blank]].map(([k, l, n]) => `<button class="chip ${filter === k ? 'active' : ''}" data-filter="${k}">${l} · ${n}</button>`).join('')}</div>
   ${rows.length ? rows.map(({ d, i }) => `<div class="review-row"><div class="review-number">${i + 1}</div><div class="review-content"><b>${escMl(d.question)}</b><div class="review-status ${d.status}">${d.status.toUpperCase()} · ${d.selected == null ? 'Not answered' : `Your answer: ${L(idxOf(d, d.selected))}`} · Correct: ${L(idxOf(d, d.correct))}${d.timeSec ? ` · ⏱ ${d.timeSec}s` : ''}${d.topic ? ` · ${esc(d.topic)}` : ''}</div><div class="review-options">${d.options.map((o, j) => `<div class="${o.original === d.correct ? 'review-correct' : o.original === d.selected ? 'review-wrong' : ''}">${L(j)}. ${esc(o.text)} ${o.original === d.correct ? '✓' : o.original === d.selected ? '✕' : ''}</div>`).join('')}</div>${d.explanation ? `<p class="explanation-text">${esc(explanationLines(d.explanation))}</p>` : ''}<div class="review-actions"><button class="textbtn ${isBookmarkedText(d.question) ? 'bm-on' : ''}" data-rbm="${i}">${isBookmarkedText(d.question) ? '⚑ Saved as difficult' : '⚐ Save as difficult'}</button><button class="textbtn" data-rai="${i}">✦ Ask AI</button></div></div></div>`).join('') : '<div class="empty-mini"><b>Nothing here</b></div>'}</div>
-<div class="result-actions"><button class="primary" id="resultHome">Back to dashboard</button>${a.isRevision ? '<button class="secondary" id="resultRevision">↻ Revision list</button>' : `<button class="secondary" id="resultAgain">↻ Retry quiz</button>${a.wrong + a.blank ? '<button class="secondary" id="retryWrong">✎ Practise mistakes</button>' : ''}`}</div></div>`;
+<div class="result-actions"><button class="primary" id="resultHome">Back to dashboard</button>${a.isRevision ? '<button class="secondary" id="resultRevision">↻ Revision list</button>' : `<button class="secondary" id="resultAgain">↻ Retry quiz</button>`}</div>
+</div>`;
   if (!a.isRevision) setupResultArtifacts(a); $('#resultHome').onclick = () => setTab('home'); $('#resultAgain')?.addEventListener('click', () => chooseMode(a.quizId)); $('#resultRevision')?.addEventListener('click', () => setTab('revision')); $('#resultPdf').onclick = () => exportAttemptPDF(a);
   const quizOf = () => db.quizzes.find(q => q.id === a.quizId);
   $$('[data-rbm]').forEach(b => b.onclick = () => { const d = a.details[Number(b.dataset.rbm)]; toggleBookmark(snapFromDetail(d, quizOf())); renderResult(a, filter); });
@@ -476,7 +467,7 @@ function renderResult(a, filter = 'all') {
   $('#perfToReports')?.addEventListener('click', () => setTab('reports'));
   $$('[data-filter]').forEach(b => b.onclick = () => renderResult(a, b.dataset.filter));
   $('#attemptMistakes')?.addEventListener('click', () => attemptFromResult(a, ['wrong'], 'Mistakes'));
-  $('#attemptCorrect')?.addEventListener('click', () => attemptFromResult(a, ['correct'], 'Correct')); $('#wrongWrite')?.addEventListener('click',()=>startWrongWrite(a));
+  $('#attemptCorrect')?.addEventListener('click', () => attemptFromResult(a, ['correct'], 'Correct'));
   $('#retryWrong')?.addEventListener('click', () => {
     const src = db.quizzes.find(q => q.id === a.quizId);
     const qs = a.details.filter(d => d.status !== 'correct').map(d => question(d.question, d.options.slice().sort((x, y) => x.original - y.original).map(o => o.text), d.correct, d.explanation));
@@ -485,11 +476,9 @@ function renderResult(a, filter = 'all') {
   });
 }
 
-function startWrongWrite(a){
- const items=a.details.filter(d=>d.status==='wrong');if(!items.length)return;
- const {el,close}=modal(`<div class="eyebrow">WRONG WRITE · ACTIVE RECALL</div><h2>Write the correct answers</h2><p>For each mistake, type the correct option text without seeing the options.</p><div class="wrongwrite-list">${items.map((d,i)=>`<label>${i+1}. ${esc(d.question)}<input data-write="${i}" placeholder="Type the correct answer"/></label>`).join('')}</div><div class="dialog-actions"><button class="primary" id="checkWrites">Check written answers</button></div>`,{wide:true});
- $('#checkWrites',el).onclick=()=>{let ok=0;const checks=items.map((d,i)=>{const val=$(`[data-write="${i}"]`,el).value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');const opt=d.options.find(o=>o.original===d.correct)?.text||'';const target=opt.toLowerCase().replace(/[^a-z0-9]/g,'');const correctIndex=d.options.findIndex(o=>o.original===d.correct),letter=String.fromCharCode(97+correctIndex);const pass=val.length>0&&(val===letter||val===target||target.includes(val)||val.includes(target));if(pass)ok++;return pass;});close();modal(`<div class="eyebrow">WRONG WRITE RESULT</div><h2>${ok}/${items.length} correct</h2><p>${checks.filter(Boolean).length} answers recalled correctly. ${items.length-ok} need another revision.</p><div class="dialog-actions"><button class="primary" id="writeDone">Done</button></div>`).el.querySelector('#writeDone').onclick=()=>document.querySelector('.mode-overlay')?.remove();};
-}
+const attemptCard = a => a.isRevision ? '' : `<div class="attempt-split"><div class="eyebrow">ATTEMPT AGAIN · NEW QUIZ FROM THIS RESULT</div><div class="attempt-split-btns">${a.wrong ? `<button class="attempt-btn attempt-mistakes" id="attemptMistakes"><b>✎ ATTEMPT MISTAKES</b><small>${a.wrong} wrong question${a.wrong > 1 ? 's' : ''} as a new quiz</small></button>` : ''}${a.correct ? `<button class="attempt-btn attempt-correct" id="attemptCorrect"><b>✓ ATTEMPT CORRECT</b><small>${a.correct} correct question${a.correct > 1 ? 's' : ''} as a new quiz</small></button>` : ''}${a.wrong + a.blank ? `<button class="attempt-btn attempt-practise" id="retryWrong"><b>↻ PRACTISE MISTAKES</b><small>${a.wrong + a.blank} wrong + skipped questions</small></button>` : ''}</div></div>`;
+const sectionTable = a => a.sections?.length ? `<div class="panel"><div class="panel-head"><div><h3>Section-wise result</h3><p>${a.omr ? 'OMR evaluation · ' : ''}Marks and accuracy in every section</p></div></div><table class="x-table"><thead><tr><th>Section</th><th>Qs</th><th>✓</th><th>✕</th><th>Skipped</th><th>Marks</th><th>Accuracy</th></tr></thead><tbody>${a.sections.map(sc => `<tr><td><b>${esc(sc.name)}</b>${sc.minutes ? `<small> · ${sc.minutes} min</small>` : ''}</td><td>${sc.total}</td><td class="green-text">${sc.correct}</td><td class="red-text">${sc.wrong}</td><td>${sc.blank}</td><td>${sc.score}</td><td>${sc.correct + sc.wrong ? Math.round(sc.correct / (sc.correct + sc.wrong) * 100) : 0}%</td></tr>`).join('')}</tbody></table></div>` : '';
+
 /** v2.8 — turn the wrong (or the correct) questions of an attempt into a fresh quiz and start it. */
 function attemptFromResult(a, statuses, label) {
   const src = db.quizzes.find(q => q.id === a.quizId);
@@ -531,6 +520,157 @@ function askWebChat({ site, prompt, signal }) {
     $('#wcPaste', el).onclick = async () => { try { reply.value = await navigator.clipboard.readText(); reply.oninput(); } catch { toast('Long-press the box and choose Paste'); reply.focus(); } };
     ok.onclick = () => { const v = reply.value.trim(); if (!v) return; finish(() => resolve(v)); close(); };
   });
+}
+
+/* ------------------------------ v2.9 · SECTIONS, CLOCK & OMR ------------------------------ */
+let pendingOmr = null, omrSaveT = null;
+const fmtClock = sec => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
+/** Sections of a quiz → [{name, minutes, start, end}] matched to the (possibly shuffled) question order. */
+function normSections(q, n) {
+  if (!Array.isArray(q.sections) || !q.sections.length) return null;
+  const list = []; let start = 0;
+  q.sections.forEach((sc, i) => { const last = i === q.sections.length - 1; const count = last ? n - start : Math.max(0, Math.min(Number(sc.count) || 0, n - start)); list.push({ name: sc.name || `Section ${i + 1}`, minutes: Number(sc.minutes) || 0, start, end: start + count }); start += count; });
+  return list.filter(s => s.end > s.start);
+}
+function shuffleWithinSections(qs, sections) { let start = 0; sections.forEach((sc, i) => { const last = i === sections.length - 1; const count = last ? qs.length - start : Math.max(0, Math.min(Number(sc.count) || 0, qs.length - start)); const part = shuffle(qs.slice(start, start + count)); part.forEach((x, k) => { qs[start + k] = x; }); start += count; }); }
+function setupClock(p) {
+  const q = p.quiz, secs = normSections(q, p.questions.length);
+  p.clock = { kind: 'none', left: 0 };
+  if (secs && secs.length) {
+    p.sections = secs; p.secIdx = 0; p.secTiming = q.secTiming === 'overall' ? 'overall' : 'section';
+    if (p.secTiming === 'section') { const m = secs[0].minutes; if (m > 0) p.clock = { kind: 'section', left: m * 60 }; }
+    else { const m = Number(q.totalMinutes) || 0; if (m > 0) p.clock = { kind: 'overall', left: m * 60 }; }
+  } else if (p.mode === 'omr') { const m = Number(pendingOmr?.minutes) || 0; if (m > 0) p.clock = { kind: 'overall', left: m * 60 }; }
+  if (p.mode === 'omr') p.omr = { sheet: Math.max(p.questions.length, Number(pendingOmr?.sheet) || 0), page: 0, view: 'paper' };
+  pendingOmr = null;
+}
+function secRange(p) { if (!p.sections || p.secTiming !== 'section') return [0, p.questions.length]; const c = p.sections[p.secIdx] || p.sections[0]; return [c.start, c.end]; }
+function secOf(p, i) { return p.sections?.find(s => i >= s.start && i < s.end) || null; }
+function headBits(p) {
+  const cur = p.sections ? (p.secTiming === 'section' ? p.sections[p.secIdx] : secOf(p, p.index)) : null;
+  const chip = cur ? `<span class="sec-chip" title="Section">${esc(cur.name)}${p.secTiming === 'section' ? ` · ${p.secIdx + 1}/${p.sections.length}` : ''}</span>` : '';
+  const clk = p.clock && p.clock.kind !== 'none' ? `<span class="clock-pill ${p.clock.left <= 60 ? 'clock-low' : ''}" id="clockDisplay">⏱ ${fmtClock(p.clock.left)}</span>` : '';
+  return chip + clk;
+}
+function paintClock() { const p = play, el = $('#clockDisplay'); if (!p || !el || !p.clock) return; const l = Math.max(0, p.clock.left); el.textContent = '⏱ ' + fmtClock(l); el.classList.toggle('clock-low', l <= 60); }
+function startClock() {
+  const p = play; if (!p || !p.clock || p.clock.kind === 'none' || p.finished) return;
+  clearInterval(p.clockIv);
+  p.clockIv = setInterval(() => {
+    if (play !== p || p.finished) { clearInterval(p.clockIv); return; }
+    p.clock.left--; paintClock(); if (p.clock.left % 5 === 0) savePlay();
+    if (p.clock.left <= 0) { clearInterval(p.clockIv); clockEnd(); }
+  }, 1000);
+}
+function clockEnd() {
+  const p = play; if (!p) return;
+  if (p.clock.kind === 'section' && p.secIdx < p.sections.length - 1) return advanceSection(true);
+  toast('⏱ Time is up — your paper was submitted automatically', 5000); finishQuiz();
+}
+function advanceSection(auto) {
+  const p = play; if (!p || !p.sections || p.secTiming !== 'section' || p.secIdx >= p.sections.length - 1) return;
+  tickTime(p); clearInterval(p.interval); clearInterval(p.clockIv); $$('.mode-overlay').forEach(o => o.remove());
+  p.secIdx++; const s = p.sections[p.secIdx]; p.index = s.start; p.visited[p.index] = true; p.qEnter = Date.now();
+  p.clock = s.minutes > 0 ? { kind: 'section', left: s.minutes * 60 } : { kind: 'none', left: 0 };
+  savePlay(); toast(auto ? `⏱ Time up — now in “${s.name}”` : `Section ${p.secIdx + 1}: ${s.name}`, 3800);
+  if (p.mode === 'omr') p.omr.page = 0;
+  renderPlayer(); startClock(); scrollTop();
+}
+function omrSetup(id) {
+  const q = db.quizzes.find(x => x.id === id); if (!q) return;
+  const n = q.questions.length, sectioned = !!(q.sections?.length), sizes = [100, 150, 200].filter(x => x >= n);
+  const { el, close } = modal(`<div class="eyebrow">OMR MODE · EXAM SIMULATION</div><h2>OMR sheet setup</h2><p>You get a question paper and a separate OMR answer sheet. Fill the A / B / C / D bubbles — everything is evaluated automatically when you submit.</p>
+    <label>OMR sheet size<select id="omrSheet"><option value="0">Auto — ${n} questions</option>${sizes.map((x, i) => `<option value="${x}" ${i === 0 && n > 60 ? 'selected' : ''}>${x}-question sheet</option>`).join('')}</select></label>
+    ${sectioned ? '<div class="notice compact">⏱ This test has section timers — they decide the time and when the next section starts.</div>' : `<label>Time limit in minutes (0 = no limit)<input id="omrMin" type="number" min="0" max="600" value="${Math.round(n * 1.2)}"/></label>`}
+    <div class="dialog-actions"><button class="primary" id="omrGo">Continue →</button></div>`);
+  $('#omrGo', el).onclick = () => { pendingOmr = { sheet: Number($('#omrSheet', el).value) || 0, minutes: sectioned ? 0 : Math.max(0, Number($('#omrMin', el)?.value) || 0) }; close(); chooseShuffle(id, 'omr'); };
+}
+function renderOmr() {
+  const p = play; if (!p) return; const total = p.questions.length, sheet = p.omr.sheet, [lo, hi] = secRange(p);
+  const maxOpt = Math.min(6, Math.max(4, ...p.questions.map(q => q.options.length)));
+  const moreSec = !!p.sections && p.secTiming === 'section' && p.secIdx < p.sections.length - 1;
+  const row = i => {
+    const used = i < total, locked = used && (i < lo || i >= hi), q = used ? p.questions[i] : null, sel = used ? p.answers[i] : null;
+    return `<div class="omr-row ${used ? '' : 'unused'} ${locked ? 'locked' : ''}" data-r="${i}"><button class="omr-no" data-goq="${i}" ${used && !locked ? '' : 'disabled'}>${i + 1}</button>${Array.from({ length: maxOpt }, (_, o) => { const orig = used ? q.options[o]?.original : undefined; const on = used && orig != null && sel === orig; return `<button class="omr-b ${on ? 'on' : ''}" data-q="${i}" data-o="${o}" ${used && orig != null && !locked ? '' : 'disabled'} aria-label="Question ${i + 1} option ${L(o)}">${L(o)}</button>`; }).join('')}</div>`;
+  };
+  const cols = []; for (let s0 = 0; s0 < sheet; s0 += 20) cols.push(`<div class="omr-col">${Array.from({ length: Math.min(20, sheet - s0) }, (_, k) => row(s0 + k)).join('')}</div>`);
+  view.innerHTML = `<div class="omr-wrap omr-v-${p.omr.view || 'paper'}" id="omrWrap"><div class="player-top"><button class="secondary" id="quitPlay">← Exit</button><span class="tag">OMR MODE</span>${headBits(p)}<div class="player-top-actions"><button class="secondary omr-switch" id="omrSwitch">▦ OMR sheet</button>${moreSec ? '<button class="secondary" id="nextSection">Next section →</button>' : ''}<button class="primary" id="omrSubmit">Submit ✓</button></div></div>
+   <div class="omr-grid"><section class="omr-paper panel" id="omrPaper"></section><section class="omr-sheet panel"><div class="omr-sheet-head"><b>OMR ANSWER SHEET</b><span id="omrCount"></span></div><div class="omr-note">Fill ONE bubble per question · tap a filled bubble again to erase it · tap a question number to open it</div><div class="omr-cols" id="omrCols">${cols.join('')}</div></section></div></div>`;
+  const count = () => { const c = $('#omrCount'); if (c) c.textContent = `${answeredCount(p)} / ${total} filled`; };
+  const paper = () => {
+    const per = 5, pages = Math.max(1, Math.ceil((hi - lo) / per)); p.omr.page = Math.max(0, Math.min(p.omr.page || 0, pages - 1));
+    const s0 = lo + p.omr.page * per, e0 = Math.min(hi, s0 + per), lang = activeLangs(p)[0];
+    $('#omrPaper').innerHTML = `<div class="omr-paper-nav"><button class="secondary" id="opPrev" ${p.omr.page === 0 ? 'disabled' : ''}>‹ Prev</button><span>Questions <b>${s0 + 1}–${e0}</b> of ${total}${p.sections ? ` · page ${p.omr.page + 1}/${pages}` : ''}</span><button class="secondary" id="opNext" ${p.omr.page >= pages - 1 ? 'disabled' : ''}>Next ›</button></div>` +
+      p.questions.slice(s0, e0).map((q, k) => { const i = s0 + k, v = qView(p.quiz, q, lang); return `<div class="omr-q" id="oq-${i}"><div class="omr-qt"><b>Q${i + 1}.</b> ${escMl(v.text)}</div><div class="omr-opts">${q.options.map((o, j) => `<div><b>(${L(j)})</b> ${escMl(v.opt(o.original))}</div>`).join('')}</div></div>`; }).join('') +
+      `<div class="omr-paper-nav"><button class="secondary" id="opPrev2" ${p.omr.page === 0 ? 'disabled' : ''}>‹ Prev</button><span class="muted">Mark answers on the OMR sheet</span><button class="secondary" id="opNext2" ${p.omr.page >= pages - 1 ? 'disabled' : ''}>Next ›</button></div>`;
+    const turn = d => { p.omr.page += d; paper(); $('#omrPaper').scrollTop = 0; scrollTop(); };
+    ['opPrev', 'opPrev2'].forEach(id => $('#' + id).onclick = () => turn(-1)); ['opNext', 'opNext2'].forEach(id => $('#' + id).onclick = () => turn(1));
+  };
+  paper(); count();
+  $('#quitPlay').onclick = () => exitPlayerPrompt();
+  $('#omrSubmit').onclick = submitQuiz;
+  $('#nextSection')?.addEventListener('click', async () => { if (await confirmBox('Move to the next section?', 'You will not be able to return to this section.', 'Next section')) advanceSection(false); });
+  $('#omrSwitch').onclick = () => { const w = $('#omrWrap'); const toSheet = !w.classList.contains('omr-v-sheet'); w.classList.toggle('omr-v-sheet', toSheet); w.classList.toggle('omr-v-paper', !toSheet); p.omr.view = toSheet ? 'sheet' : 'paper'; $('#omrSwitch').textContent = toSheet ? '☰ Question paper' : '▦ OMR sheet'; scrollTop(); };
+  if (p.omr.view === 'sheet') $('#omrSwitch').textContent = '☰ Question paper';
+  $('#omrCols').addEventListener('click', e => {
+    const b = e.target.closest('.omr-b');
+    if (b && !b.disabled) {
+      const qi = Number(b.dataset.q), o = Number(b.dataset.o), orig = p.questions[qi].options[o].original;
+      if (p.answers[qi] === orig) delete p.answers[qi]; else p.answers[qi] = orig;
+      p.lastAnswered = qi; const cur = p.answers[qi] == null ? -1 : p.questions[qi].options.findIndex(x => x.original === p.answers[qi]);
+      $$('.omr-b', b.parentElement).forEach(x => x.classList.toggle('on', Number(x.dataset.o) === cur));
+      count(); clearTimeout(omrSaveT); omrSaveT = setTimeout(savePlay, 600); return;
+    }
+    const n = e.target.closest('.omr-no');
+    if (n && !n.disabled) { const qi = Number(n.dataset.goq); p.omr.page = Math.floor((qi - lo) / 5); p.omr.view = 'paper'; const w = $('#omrWrap'); w.classList.add('omr-v-paper'); w.classList.remove('omr-v-sheet'); $('#omrSwitch').textContent = '▦ OMR sheet'; paper(); $('#oq-' + qi)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+  });
+}
+
+/* ------------------------------ v2.9 · MISTAKE NOTEBOOK (auto-collect) ------------------------------ */
+/** Every wrong answer lands in the notebook automatically; two correct answers in a row auto-mark it as mastered. */
+function collectInto(a) {
+  const items = db.notebook.items;
+  for (const d of a.details || []) {
+    if (d.status === 'blank') continue; const k = normQ(d.question); if (!k) continue; let it = items[k];
+    if (d.status === 'wrong') {
+      if (!it) it = items[k] = { key: k, text: d.question, options: (d.options || []).slice().sort((x, y) => x.original - y.original).map(o => o.text), correct: d.correct, explanation: d.explanation || '', topic: d.topic || '', subject: d.subject || a.subject || 'General', quizId: a.quizId || '', quizTitle: a.quizTitle || '', wrong: 0, first: a.date, state: 'open', streak: 0 };
+      it.wrong++; it.last = a.date; it.lastSel = d.selected; it.streak = 0; if (it.state === 'mastered') { it.state = 'open'; it.auto = false; it.reopened = (it.reopened || 0) + 1; }
+    } else if (it && it.state === 'open') { it.streak = (it.streak || 0) + 1; if (it.streak >= 2) { it.state = 'mastered'; it.auto = true; it.masteredAt = a.date; } }
+  }
+}
+function collectMistakes(a) {
+  try {
+    if (!db.notebook?.items) db.notebook = { items: {} };
+    if (!db.notebookSeeded) { db.notebookSeeded = true; db.attempts.slice().reverse().forEach(collectInto); }
+    collectInto(a);
+  } catch (e) { console.warn('notebook', e); }
+}
+
+/* ------------------------------ v2.9 · EXTRACT NOTES ------------------------------ */
+async function extractNotes(q) {
+  if (!q.questions.length) return toast('This quiz has no questions');
+  toast('Preparing study notes…', 2500);
+  try {
+    await new Promise(r => setTimeout(r, 30));
+    const { buildStudyNotesHtml } = await import('./notes-engine.js');
+    const html = buildStudyNotesHtml(q);
+    const r = await saveFile(`${slug(q.title)}-study-notes.html`, html, 'text/html');
+    toast(`Study notes saved (${r.where}) ✓`, 3800);
+  } catch (e) { console.error(e); toast('Could not create notes: ' + e.message, 5000); }
+}
+
+/* ------------------------------ v2.9 · LAZY FEATURE PAGES ------------------------------ */
+// Mock builder, Achievements, Notebook, Analyser and Predictor live in their own file that is
+// downloaded only when opened — startup stays as fast as before.
+let extrasP = null; const loadExtras = () => extrasP ||= import('./extras.js');
+const extrasCtx = () => ({
+  get db() { return db; }, view, save, $, $$, esc, escMl, md, toast, modal, confirmBox, actionSheet, setTab, chooseMode, question, quizTemplate, uid, shuffle, AI, gemini,
+  parseText, parseJSON, buildProfile, normQ, askAI, saveFile, slug, L, languageLabel, startQuiz, fmtDur, dueItems,
+  ensureNotebook() { if (!db.notebook?.items) db.notebook = { items: {} }; if (!db.notebookSeeded) { db.notebookSeeded = true; db.attempts.slice().reverse().forEach(collectInto); save(); } },
+});
+function lazyPage(name) {
+  view.innerHTML = '<div class="empty-state"><div>⏳</div><h3>Loading…</h3></div>';
+  loadExtras().then(m => { if (db.activeTab === name && !play) m.pages[name](extrasCtx()); }).catch(e => { console.error(e); extrasP = null; view.innerHTML = `<div class="empty-state"><div>⚠</div><h3>Could not load this page</h3><p>${esc(e.message)}</p></div>`; });
 }
 
 /* ------------------------------ REPORTS ------------------------------ */
@@ -1389,97 +1529,18 @@ Task: ${task}`;
 }
 
 /* ---------- AI studio page ---------- */
-
-/* ---------------- QUIZINOX NEW MODULES ---------------- */
-function configureOMR(id) {
-  const q=db.quizzes.find(x=>x.id===id); if(!q)return;
-  const {el,close}=modal(`<div class="eyebrow">OMR PRACTICE SHEET</div><h2>${esc(q.title)}</h2><p>Choose how many questions to include. Answers are marked on a bubble sheet and evaluated only after submission.</p><div class="form-grid"><label>Number of questions<select id="omrCount">${[50,100,150,200].filter(n=>n<=q.questions.length).concat(q.questions.length).filter((n,i,a)=>a.indexOf(n)===i).sort((a,b)=>a-b).map(n=>`<option value="${n}" ${n===Math.min(100,q.questions.length)?'selected':''}>${n}</option>`).join('')}</select></label><label>Question order<select id="omrOrder"><option value="random">Random shuffle</option><option value="sequence">Original sequence</option></select></label></div><div class="dialog-actions"><button class="primary" id="omrStart">Start OMR →</button></div>`);
-  $('#omrStart',el).onclick=()=>{const count=Number($('#omrCount',el).value);const random=$('#omrOrder',el).value==='random';close();startQuiz(id,'omr','none',null,{count,random});};
-}
-function configureFullMock(id) {
- const q=db.quizzes.find(x=>x.id===id);if(!q)return;
- const {el,close}=modal(`<div class="eyebrow">FULL MOCK SIMULATOR</div><h2>${esc(q.title)}</h2><p>Set the exam duration and question count independently from the original quiz settings.</p><div class="form-grid"><label>Total time (minutes)<input id="mockMinutes" type="number" min="1" max="600" value="120"/></label><label>Number of questions<input id="mockCount" type="number" min="1" max="${q.questions.length}" value="${Math.min(q.questions.length,100)}"/></label><label>Negative marking<select id="mockNegative">${[0,.25,.33,.5,1].map(n=>`<option value="${n}" ${n===(q.settings.negative||0)?'selected':''}>${n?`−${n} per wrong`:'No negative marking'}</option>`).join('')}</select></label><label>Question order<select id="mockOrder"><option value="random">Random shuffle</option><option value="sequence">Original sequence</option></select></label><label>Attempt mode<select id="mockMode"><option value="exam">Exam mode · answers after submission</option><option value="practice">Practice mode · instant feedback</option></select></label></div><div class="dialog-actions"><button class="primary" id="mockStart">Start Full Mock →</button></div>`,{wide:true});
- $('#mockStart',el).onclick=()=>{const mins=Math.max(1,Math.min(600,Number($('#mockMinutes',el).value)||120)),count=Math.max(1,Math.min(q.questions.length,Number($('#mockCount',el).value)||q.questions.length)),neg=Number($('#mockNegative',el).value),random=$('#mockOrder',el).value==='random',mode=$('#mockMode',el).value;close();const copy=structuredClone(q);copy.settings={...copy.settings,negative:neg,timer:0};startQuiz(id,mode,'none',copy,{count,random,duration:mins*60});};
-}
-function renderOMRPlayer(){
- const p=play,total=p.questions.length,done=answeredCount(p),left=p.remainingTotal;
- view.innerHTML=`<div class="player-wrap omr-wrap"><div class="player-top"><button class="secondary" id="quitPlay">← Exit</button><span class="tag">OMR PRACTICE MODE</span><span class="tag">${done}/${total} MARKED</span></div><div class="omr-head panel"><div><div class="eyebrow">ANSWER SHEET</div><h1>${esc(p.quiz.title)}</h1><p>Mark one bubble per question. You can change answers until final submission.</p></div><div class="omr-countdown">${total} <small>QUESTIONS</small></div></div><div class="omr-sheet panel"><div class="omr-sheet-title"><b>QUESTION</b><span>A</span><span>B</span><span>C</span><span>D</span></div>${p.questions.map((q,i)=>`<div class="omr-row"><div class="omr-qno">${String(i+1).padStart(3,'0')}</div>${[0,1,2,3].map((n)=>`<button class="omr-bubble ${p.answers[i]===n?'selected':''}" data-omr="${i}:${n}" aria-label="Question ${i+1} option ${String.fromCharCode(65+n)}">${String.fromCharCode(65+n)}</button>`).join('')}</div>`).join('')}</div><div class="omr-footer panel"><span>${total-done} unanswered · ${done} marked</span><button class="primary" id="submitQuiz">Submit OMR sheet ✓</button></div></div>`;
- $('#quitPlay').onclick=()=>exitPlayerPrompt();$$('[data-omr]').forEach(b=>b.onclick=()=>{const [i,n]=b.dataset.omr.split(':').map(Number);p.answers[i]=n;savePlay();renderOMRPlayer();});$('#submitQuiz').onclick=submitQuiz;
-}
-function sectionStudio(){
- db.sections ||= [];
- view.innerHTML=`<div class="page-title"><div><div class="eyebrow">MULTI-SECTION EXAM BUILDER</div><h1>Section Mode</h1><p>Create timed subject-wise tests using existing quizzes. Each section advances automatically when its own timer ends.</p></div><button class="primary" id="newPlan">＋ New section test</button></div>
- <div class="panel"><div class="panel-head"><div><h3>Saved section tests</h3><p>Build a plan from saved quizzes, including AI-generated or manually-created quizzes.</p></div></div>${db.sections.length?db.sections.map((pl,i)=>`<div class="section-plan-row"><div><b>${esc(pl.title)}</b><small>${pl.sections.length} sections · ${pl.sections.reduce((n,x)=>n+x.count,0)} questions · ${Math.round(pl.sections.reduce((n,x)=>n+x.seconds,0)/60)} min</small></div><button class="primary" data-plan-start="${i}">Start</button><button class="secondary" data-plan-edit="${i}">Edit</button><button class="mini delete" data-plan-del="${i}">×</button></div>`).join(''):'<div class="empty-mini"><b>No section tests yet</b><small>Create a plan and add subject-wise sections.</small></div>'}</div>
- <div class="panel section-help"><h3>How to add questions</h3><p>Use any saved quiz as a section source. To create a section manually, use Create Quiz; for AI-generated sections, save questions from AI Question Generator first. Importing takes only the number of questions you set, either in original sequence or random order.</p><button class="secondary" id="sectionCreateQuiz">＋ Create a quiz for a section</button><button class="secondary" id="sectionAI">✦ Open AI question generator</button></div>`;
- $('#newPlan').onclick=()=>editSectionPlan();
- $('#sectionCreateQuiz').onclick=()=>setTab('create');$('#sectionAI').onclick=()=>aiGenerator();
- $$('[data-plan-start]').forEach(b=>b.onclick=()=>startSectionPlan(db.sections[Number(b.dataset.planStart)]));
- $$('[data-plan-edit]').forEach(b=>b.onclick=()=>editSectionPlan(Number(b.dataset.planEdit)));
- $$('[data-plan-del]').forEach(b=>b.onclick=async()=>{const i=Number(b.dataset.planDel);if(await confirmBox('Delete section test?',db.sections[i].title,'Delete',true)){db.sections.splice(i,1);save();sectionStudio();}});
-}
-function editSectionPlan(index=null){
- const old=index==null?null:structuredClone(db.sections[index]), plan=old||{id:uid(),title:'My Section Test',sections:[]};
- const {el,close}=modal(`<div class="eyebrow">SECTION TEST DESIGNER</div><h2>${old?'Edit':'Create'} section test</h2><label>Test name<input id="planTitle" value="${esc(plan.title)}"/></label><div class="divider"></div><div class="panel section-editor"><h3>Add a section</h3><div class="form-grid"><label>Section name<input id="secName" placeholder="e.g. History / Polity"/></label><label>Source quiz<select id="secQuiz">${db.quizzes.map(q=>`<option value="${q.id}">${esc(q.title)} (${q.questions.length} Q)</option>`).join('')}</select></label><label>Questions to import<input id="secCount" type="number" min="1" value="25"/></label><label>Section time (minutes)<input id="secMinutes" type="number" min="1" value="30"/></label><label>Import order<select id="secOrder"><option value="random">Randomly shuffle</option><option value="sequence">Keep sequence</option></select></label></div><button class="secondary" id="addSection" ${db.quizzes.length?'':'disabled'}>＋ Add this section</button></div><div id="sectionDrafts">${plan.sections.map((x,i)=>`<div class="section-plan-row"><div><b>${esc(x.name)}</b><small>${x.count} questions · ${Math.round(x.seconds/60)} min</small></div><button class="mini delete" data-draft-remove="${i}">×</button></div>`).join('')}</div><div class="dialog-actions"><button class="primary" id="savePlan">Save section test</button></div>`,{wide:true});
- const draw=()=>{$('#sectionDrafts',el).innerHTML=plan.sections.map((x,i)=>`<div class="section-plan-row"><div><b>${esc(x.name)}</b><small>${x.count} questions · ${Math.round(x.seconds/60)} min</small></div><button class="mini delete" data-draft-remove="${i}">×</button></div>`).join('');$$('[data-draft-remove]',el).forEach(b=>b.onclick=()=>{plan.sections.splice(Number(b.dataset.draftRemove),1);draw();});};
- draw(); $('#addSection',el).onclick=()=>{const q=db.quizzes.find(x=>x.id===$('#secQuiz',el).value);if(!q)return toast('Create or import a quiz first');const count=Math.max(1,Math.min(q.questions.length,Number($('#secCount',el).value)||q.questions.length));plan.sections.push({id:uid(),name:$('#secName',el).value.trim()||q.subject||q.title,quizId:q.id,count,seconds:Math.max(60,Number($('#secMinutes',el).value)*60||1800),order:$('#secOrder',el).value});draw();};
- $('#savePlan',el).onclick=()=>{if(!plan.sections.length)return toast('Add at least one section');plan.title=$('#planTitle',el).value.trim()||'Section Test';if(index==null)db.sections.push(plan);else db.sections[index]=plan;save();close();sectionStudio();toast('Section test saved');};
-}
-function startSectionPlan(plan){
- const sections=plan.sections.map(sec=>{const q=db.quizzes.find(x=>x.id===sec.quizId);if(!q)return null;let qs=q.questions.map(x=>({...x,options:x.options.map((t,i)=>({text:t,original:i})),quizId:q.id}));if(sec.order==='random')shuffle(qs);return {...sec,quizTitle:q.title,questions:qs.slice(0,Math.min(sec.count,qs.length))};}).filter(x=>x&&x.questions.length);
- if(!sections.length)return toast('The source quizzes for this plan are missing');
- const all=[],meta=[];sections.forEach(sec=>{const start=all.length;all.push(...sec.questions);meta.push({name:sec.name,start,end:all.length-1,seconds:sec.seconds});});
- const virtual={id:'section-'+plan.id,title:plan.title,subject:'Section Test',settings:{timer:0,negative:0,pass:40},questions:all.map(x=>({...x,options:x.options.map(o=>o.text)}))};
- const {el,close}=modal(`<div class="eyebrow">SECTION TEST</div><h2>${esc(plan.title)}</h2><p>${meta.map(m=>`${esc(m.name)}: ${m.end-m.start+1} questions · ${Math.round(m.seconds/60)} min`).join('<br>')}</p><label>Attempt mode<select id="sectionMode"><option value="exam">Exam mode</option><option value="practice">Practice mode</option></select></label><div class="dialog-actions"><button class="primary" id="sectionBegin">Begin test →</button></div>`);
- $('#sectionBegin',el).onclick=()=>{const mode=$('#sectionMode',el).value;close();startQuiz(virtual.id,mode,'none',virtual,{sectionMeta:meta});if(play){play.sectionMeta=meta;play.sectionIndex=0;play.remainingSection=meta[0].seconds;savePlay();renderPlayer();}};
-}
-function mistakeNotebook(){
- const all=Object.values(db.mistakeNotebook||{}),active=all.filter(x=>!x.mastered);
- view.innerHTML=`<div class="page-title"><div><div class="eyebrow">PERSONAL MISTAKE NOTEBOOK</div><h1>Your mistakes</h1><p>Wrong answers are collected automatically. Master a question when you can consistently answer it correctly.</p></div><button class="primary" id="mistakePractice" ${active.length?'':'disabled'}>Practise mistakes</button></div><div class="stats-grid"><div class="stat-card"><small>OPEN MISTAKES</small><strong>${active.length}</strong></div><div class="stat-card"><small>MASTERED</small><strong>${all.length-active.length}</strong></div><div class="stat-card"><small>REPEATED ERRORS</small><strong>${active.filter(x=>x.occurrences>1).length}</strong></div></div><div class="panel">${all.length?all.sort((a,b)=>b.lastWrong-a.lastWrong).map(x=>`<div class="mistake-row"><div><b>${esc(x.question)}</b><small>${esc(x.quizTitle||'Quiz')} · Wrong ${x.occurrences} time(s) · ${x.mastered?'MASTERED':'NEEDS REVISION'}</small></div><button class="secondary" data-master="${esc(x.key)}">${x.mastered?'Unmaster':'Mark mastered'}</button></div>`).join(''):'<div class="empty-mini"><b>No mistakes collected yet</b><small>Incorrect answers from completed quizzes will appear here.</small></div>'}</div>`;
- $('#mistakePractice').onclick=()=>practiceMistakes(active);
- $$('[data-master]').forEach(b=>b.onclick=()=>{const x=db.mistakeNotebook[b.dataset.master];if(x){x.mastered=!x.mastered;save();mistakeNotebook();}});
-}
-function practiceMistakes(rows){
- if(!rows.length)return;const qs=rows.map(x=>question(x.question,x.options.slice().sort((a,b)=>a.original-b.original).map(o=>o.text),x.correct,x.explanation,x.topic));
- const q=quizTemplate('Personal Mistake Notebook');q.subject='Revision';q.questions=qs;startQuiz(q.id,'practice','questions',q);
-}
-function achievementsPage(){
- const attempts=db.attempts.filter(a=>!a.isRevision),total=attempts.reduce((n,a)=>n+a.total,0),correct=attempts.reduce((n,a)=>n+a.correct,0),xp=correct*10+attempts.length*25;
- const days=[...new Set(attempts.map(a=>new Date(a.date).toDateString()))].sort((a,b)=>new Date(a)-new Date(b));let streak=0;for(let i=days.length-1;i>=0;i--){const gap=(new Date().setHours(0,0,0,0)-new Date(days[i]).setHours(0,0,0,0))/86400000;if(gap===streak||gap===streak+1)streak++;else break;}
- const best=attempts.length?Math.max(...attempts.map(a=>a.percent)):0;
- const badges=[['First Steps',attempts.length>=1,'Complete your first quiz'],['Century Solver',total>=100,'Solve 100 questions'],['500 Club',total>=500,'Solve 500 questions'],['Accuracy Ace',correct>=50&&correct/Math.max(1,total)>=.8,'80%+ accuracy over 50 questions'],['Perfect Run',attempts.some(a=>a.percent===100),'Score 100% in a quiz'],['7-Day Streak',streak>=7,'Study on 7 consecutive days'],['Subject Explorer',new Set(attempts.map(a=>a.subject)).size>=5,'Attempt 5 subjects']];
- view.innerHTML=`<div class="page-title"><div><div class="eyebrow">YOUR MILESTONES</div><h1>Achievements</h1><p>XP, streaks, badges and personal bests — kept in this dedicated section.</p></div></div><div class="stats-grid"><div class="stat-card"><small>TOTAL XP</small><strong>${xp}</strong><span>10 XP per correct answer + 25 per completed test</span></div><div class="stat-card"><small>DAILY STREAK</small><strong>${streak} 🔥</strong></div><div class="stat-card"><small>QUESTIONS SOLVED</small><strong>${total}</strong></div><div class="stat-card"><small>PERSONAL BEST</small><strong>${best}%</strong></div></div><div class="panel"><div class="panel-head"><div><h3>Achievement badges</h3><p>${badges.filter(b=>b[1]).length} of ${badges.length} unlocked</p></div></div><div class="badge-grid">${badges.map(b=>`<div class="achievement-badge ${b[1]?'unlocked':'locked'}"><span>${b[1]?'🏅':'🔒'}</span><b>${b[0]}</b><small>${b[2]}</small></div>`).join('')}</div></div><div class="panel"><h3>Personal records</h3><div class="record-row"><span>Most questions in one attempt</span><b>${attempts.reduce((m,a)=>Math.max(m,a.total),0)}</b></div><div class="record-row"><span>Highest score</span><b>${best}%</b></div><div class="record-row"><span>Most correct in one attempt</span><b>${attempts.reduce((m,a)=>Math.max(m,a.correct),0)}</b></div></div>`;
-}
-function predictorPage(){
- const attempts=db.attempts.filter(a=>!a.isRevision),details=attempts.flatMap(a=>a.details||[]),total=details.length,wrong=details.filter(d=>d.status==='wrong'),correct=details.filter(d=>d.status==='correct'),blank=details.filter(d=>d.status==='blank');
- const subjects={};details.forEach(d=>{const k=d.subject||'General';(subjects[k]||= {total:0,wrong:0,correct:0,blank:0,questions:[]});subjects[k].total++;subjects[k][d.status]++;subjects[k].questions.push(d);});
- const acc=total?Math.round(correct.length/Math.max(1,total-blank.length)*100):0,readiness=Math.max(0,Math.min(100,Math.round(acc*.65+Math.min(100,attempts.length*5)*.2+Math.min(100,total/5)*.15)));
- const weak=Object.entries(subjects).sort((a,b)=>(b[1].wrong/Math.max(1,b[1].total))-(a[1].wrong/Math.max(1,a[1].total))).slice(0,8);
- view.innerHTML=`<div class="page-title"><div><div class="eyebrow">AI-ASSISTED PREPARATION ESTIMATE</div><h1>Quizinox Predictor</h1><p>Analyses every recorded attempted question, wrong answers, skipped questions, subject weaknesses and progress. This is a study-readiness indicator, not a selection probability.</p></div><button class="primary" id="predictAI">✦ Deep AI analysis</button></div><div class="stats-grid"><div class="stat-card"><small>READINESS INDICATOR</small><strong>${attempts.length?readiness+'%':'—'}</strong><span>Based on available attempt history</span></div><div class="stat-card"><small>QUESTIONS ANALYSED</small><strong>${total}</strong></div><div class="stat-card"><small>WRONG ANSWERS</small><strong class="red-text">${wrong.length}</strong></div><div class="stat-card"><small>SKIPPED</small><strong>${blank.length}</strong></div></div><div class="panel"><h3>Where mistakes happen</h3>${weak.map(([k,v])=>`<div class="predict-row"><b>${esc(k)}</b><span>${v.wrong} wrong / ${v.total} total</span><strong>${Math.round(v.wrong/Math.max(1,v.total)*100)}% error rate</strong></div>`).join('')||'<div class="empty-mini">Complete quizzes to build your analysis.</div>'}</div><div class="panel"><h3>Repeatedly missed questions</h3>${wrong.slice(-20).reverse().map(d=>`<div class="mistake-row"><div><b>${esc(d.question)}</b><small>${esc(d.subject||'General')} · ${esc(d.topic||'No topic tag')}</small></div><span class="pill red">WRONG</span></div>`).join('')||'<div class="empty-mini">No incorrect answers recorded.</div>'}<div id="predictOutput"></div></div>`;
- $('#predictAI').onclick=async()=>{const out=$('#predictOutput');out.innerHTML='<div class="ai-loading"><i></i><i></i><i></i></div>';try{const summary=JSON.stringify({total,correct:correct.length,wrong:wrong.length,blank:blank.length,subjects:weak.map(([k,v])=>({subject:k,total:v.total,correct:v.correct,wrong:v.wrong,blank:v.blank})),questionHistory:details.map(d=>({q:d.question,subject:d.subject,topic:d.topic,status:d.status,selected:d.selected,correct:d.correct,options:(d.options||[]).map(o=>o.text),timeSec:d.timeSec}))});const r=await AI.aiCall('You are Quizinox Predictor, an exam-preparation analyst. Analyse all supplied attempt data. Identify exact mistake patterns, weak subjects/topics, likely causes, careless vs conceptual errors when evidence supports it, and a prioritised 7-day corrective plan. Give a cautious readiness range with confidence and explain limitations. Do not claim selection probability. Reply in clear Hinglish. Data: '+summary,{json:false,maxTokens:2200,temperature:.25});out.innerHTML=`<div class="ai-answer">${md(r.text)}</div>`;}catch(e){out.innerHTML=`<p class="red-text">${esc(e.message)}</p>`;}};
-}
-function analyserPage(){
- view.innerHTML=`<div class="page-title"><div><div class="eyebrow">SEPARATE AI TEACHER</div><h1>Quizinox Analyser</h1><p>A separate question-and-doubt analyser. Existing AI Personal Study Analyst and AI Tutor are unchanged.</p></div></div><div class="panel"><h3>Ask your study doubt</h3><textarea id="analyserQuestion" rows="4" placeholder="Ask any subject or concept doubt..."></textarea><div class="form-grid"><label>Subject (optional)<input id="analyserSubject" placeholder="e.g. Polity"/></label><label>Explanation level<select id="analyserLevel"><option>Easy</option><option selected>Moderate</option><option>Advanced</option></select></label></div><div class="dialog-actions"><button class="primary" id="runAnalyser">Analyse & explain</button></div><div id="analyserOutput"></div></div><div class="panel"><h3>Analyse my mistake history</h3><p class="muted">Uses your saved attempted questions to explain recurring errors and concepts that need work.</p><button class="secondary" id="analyseMistakes">Analyse mistakes with AI</button><button class="secondary" id="analyseAllHistory">Analyse complete quiz history</button><div id="mistakeAnalysisOutput"></div><div id="allHistoryOutput"></div></div>`;
- $('#runAnalyser').onclick=async()=>{const q=$('#analyserQuestion').value.trim();if(!q)return toast('Enter a question first');const out=$('#analyserOutput');out.innerHTML='<div class="ai-loading"><i></i><i></i><i></i></div>';try{const r=await AI.aiCall(`You are Quizinox Analyser, a patient competitive-exam teacher. Explain in ${$('#analyserLevel').value} detail. Subject: ${$('#analyserSubject').value||'General'}. Explain concepts, examples, common traps and ask 2 short follow-up check questions. Use clear Hinglish. Student query: ${q}`,{json:false,maxTokens:1800,temperature:.35});out.innerHTML=`<div class="ai-answer">${md(r.text)}</div>`;}catch(e){out.innerHTML=`<p class="red-text">${esc(e.message)}</p>`;}};
- $('#analyseMistakes').onclick=async()=>{const out=$('#mistakeAnalysisOutput'),data=Object.values(db.mistakeNotebook||{}).filter(x=>!x.mastered).slice(-100);if(!data.length)return toast('No saved mistakes yet');out.innerHTML='<div class="ai-loading"><i></i><i></i><i></i></div>';try{const r=await AI.aiCall('Analyse this student mistake notebook. Find recurring concepts and patterns, explain each and give targeted practice advice in Hinglish. Data: '+JSON.stringify(data.map(x=>({question:x.question,subject:x.subject,topic:x.topic,correct:x.correct,selected:x.selected,occurrences:x.occurrences}))),{json:false,maxTokens:1800,temperature:.3});out.innerHTML=`<div class="ai-answer">${md(r.text)}</div>`;}catch(e){out.innerHTML=`<p class="red-text">${esc(e.message)}</p>`;}};
- $('#analyseAllHistory').onclick=async()=>{const out=$('#allHistoryOutput'),history=db.attempts.filter(a=>!a.isRevision).flatMap(a=>(a.details||[]).map(d=>({question:d.question,subject:d.subject,topic:d.topic,status:d.status,selected:d.selected,correct:d.correct,options:(d.options||[]).map(o=>o.text)})));if(!history.length)return toast('Complete a quiz first');out.innerHTML='<div class="ai-loading"><i></i><i></i><i></i></div>';try{const r=await AI.aiCall('You are Quizinox Analyser. Analyse this learner complete attempt history, including correct, incorrect and skipped questions. Find knowledge gaps, misconceptions, repeated traps, strong concepts and next learning steps. Explain the concepts behind errors in simple Hinglish and ask follow-up checks. Data: '+JSON.stringify(history),{json:false,maxTokens:2600,temperature:.25});out.innerHTML=`<div class="ai-answer">${md(r.text)}</div>`;}catch(e){out.innerHTML=`<p class="red-text">${esc(e.message)}</p>`;}};
-}
-function extractQuizNotes(q){
- const lines=[];q.questions.forEach((x,i)=>{lines.push(`Q${i+1}. ${x.text}`,'😂');x.options.forEach((o,j)=>lines.push(`${String.fromCharCode(65+j)}. ${o}${j===x.correct?' ✅':''}`));lines.push(`Ex: ${x.explanation||'Explanation not provided.'}`,'');});
- const w=window.open('./tools/notes-generator.html','_blank');if(!w)return toast('Allow pop-ups to export notes');const payload=lines.join('\n');const safe=(q.title||'quiz').replace(/[^a-z0-9-_]+/gi,'-').replace(/^-+|-+$/g,'').slice(0,70)||'quiz';const data={type:'QUIZINOX_NOTES_EXPORT',text:payload,filename:`${safe}-study-notes.html`};const send=()=>{try{w.postMessage(data,'*');}catch{}};w.addEventListener('load',send,{once:true});[700,1500,3000,5000].forEach(ms=>setTimeout(send,ms));toast('Opening Notes Generator and preparing HTML…');
-}
-function configureMockTimer(p){/* placeholder for section and full-mock clocks; managed in player interval below */}
 function aiStudio() {
   const keys = AI.getKeys(), healthy = keys.filter(k => k.enabled !== false && k.status !== 'invalid').length, pp = AI.primaryProvider(), m = AI.selectedModel(pp), mode = db.settings.aiMode || 'auto', login = (AI.puterLinked() && mode !== 'api') || AI.aiSource() === 'web';
   view.innerHTML = `<div class="page-title"><div><div class="eyebrow">ONLINE · OPTIONAL · MULTI-AI</div><h1>AI Study Studio</h1><p>AI only runs when you tap a button. Keys and providers back each other up — if one fails, the next AI continues the work.</p></div><button class="secondary" id="aiKeysBtn">⚙ AI keys (${keys.length})</button></div>
   <div class="stats-grid"><div class="stat-card"><div class="stat-icon purple">⚿</div><small>API KEYS${login ? ' + LOGIN' : ''}</small><strong>${healthy}/${keys.length}</strong><span>${keys.length ? 'healthy keys' : login ? 'Using Puter login' : 'Add a free key in Settings'}</span></div><div class="stat-card"><div class="stat-icon blue">✦</div><small>${login ? 'PRIMARY · LOGIN' : 'MAIN AI'}</small><strong class="small-strong">${esc(login ? 'Puter login' : AI.providerName(pp))}</strong><span>${esc(login ? (db.settings.puterModel || 'default model') : (AI.modelLabel(pp, m) || 'default model'))}${db.settings.aiCross === false ? '' : ' · auto-switch on'}</span></div><div class="stat-card"><div class="stat-icon green">↯</div><small>REQUESTS TODAY</small><strong>${AI.todayTotal()}</strong><span>~${AI.remainingLabel(m, pp)} left on main AI today</span></div><div class="stat-card"><div class="stat-icon amber">◎</div><small>ANALYST RUNS LEFT</small><strong>${analystRemaining()}</strong><span>of ${db.settings.analystDaily}/day</span></div></div>
   ${keys.length || login ? '' : '<div class="notice">🔑 To use AI, add a free key (Gemini, Groq, OpenRouter…) in Settings → AI, or sign in with Puter. Add several — if one fails or runs out, the next is used automatically.</div>'}
   <div class="tool-grid ai-grid">
-   <div class="tool-card"><div class="tool-icon">🧭</div><h3>Quizinox Analyser</h3><p>Separate AI teacher for doubts, question history and mistake-led explanations. Existing AI Tutor remains unchanged.</p><button class="secondary" id="openAnalyser">Open Analyser</button></div><div class="tool-card"><div class="tool-icon">◈</div><h3>Quizinox Predictor</h3><p>Analyse every attempted question, identify where mistakes happen and estimate preparation readiness.</p><button class="secondary" id="openPredictor">Open Predictor</button></div><div class="tool-card featured"><div class="tool-icon">🤖</div><h3>AI Personal Study Analyst</h3><p>Analyses all your attempts: weak subjects, repeated mistakes, accuracy, speed — then gives a personalised 7-day plan. 1 request per analysis.</p><button class="primary" id="goAnalyst">Open analyst</button></div>
+   <div class="tool-card featured"><div class="tool-icon">🤖</div><h3>AI Personal Study Analyst</h3><p>Analyses all your attempts: weak subjects, repeated mistakes, accuracy, speed — then gives a personalised 7-day plan. 1 request per analysis.</p><button class="primary" id="goAnalyst">Open analyst</button></div>
    <div class="tool-card"><div class="tool-icon">💬</div><h3>Ask AI — Question Tutor</h3><p>On any question: why the answer is correct, why the others are wrong, simple explanation, what else to read for UPSC, similar MCQs. Find "✦ Ask AI" in practice mode, results, revision and search.</p><button class="secondary" id="goTutor">Pick a question</button></div>
    <div class="tool-card"><div class="tool-icon">✦</div><h3>AI Question Generator</h3><p>From a topic, PDF, notes or your weak topics: UPSC MCQs, statements, match the following, assertion-reason, multiple-correct, pairs and chronology. Choose difficulty, language and explanation depth.</p><button class="secondary" id="goGen">Open generator</button></div>
   </div>
   <div class="panel"><div class="panel-head"><div><h3>💡 Ask a general study doubt</h3><p>Any concept, comparison or "explain like I'm new" question</p></div></div><textarea id="doubtText" rows="3" placeholder="e.g. Difference between Fundamental Rights and Directive Principles with examples"></textarea><div class="dialog-actions"><select id="doubtLang" class="auto-w">${['English', 'Hindi', 'Hinglish'].map(l => `<option ${db.settings.tutorLang === l ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="primary" id="doubtAsk">Ask AI</button></div><div class="muted" id="doubtStatus"></div><div id="doubtOut" class="tutor-out"></div></div>`;
-  $('#aiKeysBtn').onclick = () => setTab('settings'); $('#openAnalyser')?.addEventListener('click',()=>setTab('analyser')); $('#openPredictor')?.addEventListener('click',()=>setTab('predictor')); $('#goGen').onclick = () => aiGenerator();
+  $('#aiKeysBtn').onclick = () => setTab('settings'); $('#goGen').onclick = () => aiGenerator();
   $('#goAnalyst').onclick = () => { setTab('reports'); setTimeout(() => $('#analystPanel')?.scrollIntoView({ behavior: 'smooth' }), 80); };
   $('#goTutor').onclick = () => { if (dueItems().length || Object.keys(db.revision).length) setTab('revision'); else setTab('search'); toast('Tap "✦ Ask AI" on any question'); };
   $('#doubtAsk').onclick = async () => {
@@ -1497,6 +1558,7 @@ document.addEventListener('keydown', e => {
   const overlays = $$('.mode-overlay');
   if (e.key === 'Escape' && overlays.length) { overlays[overlays.length - 1].remove(); e.preventDefault(); return; }
   if (!play || overlays.length) return;
+  if (play.mode === 'omr') { if (e.key === 'Escape') { exitPlayerPrompt(); e.preventDefault(); } return; }
   const t = e.target, tag = (t?.tagName || '').toLowerCase();
   if (['input', 'textarea', 'select'].includes(tag) || t?.isContentEditable) return;
   const p = play, k = e.key, lower = k.length === 1 ? k.toLowerCase() : k, total = p.questions.length;
@@ -1506,9 +1568,9 @@ document.addEventListener('keydown', e => {
   switch (lower) {
     case 'ArrowRight': case 'PageDown': swipeGo(1); break;
     case 'ArrowLeft': case 'PageUp': swipeGo(-1); break;
-    case 'Enter': case ' ': if (tag === 'button') return; if (p.index < total - 1) go(p.index + 1); else submitQuiz(); break;
-    case 'Home': go(0); break;
-    case 'End': go(total - 1); break;
+    case 'Enter': case ' ': if (tag === 'button') return; if (p.index < secRange(p)[1] - 1) go(p.index + 1); else if (p.sections && p.secTiming === 'section' && p.secIdx < p.sections.length - 1) $('#nextSection')?.click(); else submitQuiz(); break;
+    case 'Home': go(secRange(p)[0]); break;
+    case 'End': go(secRange(p)[1] - 1); break;
     case 'm': toggleMark(); break;
     case 'f': toggleBookmark(snapFromPlay(p, q)); renderPlayer(); break;
     case 'x': case 'Delete': clearAnswer(); break;
