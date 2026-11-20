@@ -3,6 +3,7 @@ import { fixQuestionsFile, convertFormat, parseText as parseMcqText } from './te
 import { saveFile, shareFile, onBackButton, isNative } from './native.js';
 import * as AI from './ai.js';
 import * as Store from './storage.js';
+import { UPSC_NAV, UPSC_TABS, UPSC_LABELS, mergeUpsc, upscHomeHtml } from './upsc/lite.js';
 const iconUrl = './quizinox-icon.png';
 // Keep the quiz/player startup bundle light. PDF engines and jsPDF are loaded
 // only when a user actually opens a PDF/export feature (important on low-RAM PCs).
@@ -35,7 +36,7 @@ function explanationLines(value) {
 }
 const L = i => String.fromCharCode(65 + i);
 const STORE = 'quizinox_local_v1', PLAY_STORE = 'quizinox_play_v1';
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '3.0.0';
 const defaultState = () => ({ quizzes: [], attempts: [], notebook: { items: {} }, notebookSeeded: false, achSeen: [], analyser: [], shuffleHistory: {}, bookmarks: {}, revision: {}, revStats: { mastered: 0 }, aiAnalysis: null, aiLog: {}, settings: { name: 'Learner', geminiKey: '', aiKeys: [], aiModel: AI.FALLBACK_CHAIN[0], aiModels: {}, aiPrimary: 'gemini', aiMode: 'auto', aiOrder: AI.DEFAULT_ORDER.slice(), aiDisabled: {}, aiCross: true, aiGuard: true, puterLinked: false, puterModel: '', customBaseUrl: '', aiModelLists: {}, aiAutoFallback: true, analystDaily: 5, tutorLang: 'English', langMode: 'single', langs: ['original'], aiSource: 'default', aiLogin: { enabled: {}, models: {}, order: [], modelList: [] }, aiWeb: { site: 'chatgpt', customUrl: '' } }, activeTab: 'home' });
 let db = load();
 let currentQuiz = null, play = null, toastTimer = null, lastResult = null;
@@ -115,6 +116,8 @@ document.querySelector('#app').innerHTML = `
       <button class="navitem" data-tab="predictor"><span>🎯</span> Quizinox Predictor</button>
       <button class="navitem" data-tab="ai"><span>✦</span> AI Studio</button>
       <button class="navitem" data-tab="tools"><span>⌘</span> File Studio</button>
+      <div class="nav-group">UPSC PREPARATION CENTRE</div>
+      ${UPSC_NAV.map(([k, i, l]) => `<button class="navitem u-nav" data-tab="${k}"><span>${i}</span> ${l}</button>`).join('')}
       <button class="navitem" data-tab="settings"><span>⚙</span> Settings</button>
     </nav>
     <div class="sidebottom"><div class="offline-pill"><i></i> Works offline</div><small>All quiz data stays on this device. AI tools use the internet only when you start them.</small><div class="version">QUIZINOX · v${APP_VERSION}</div></div>
@@ -134,7 +137,8 @@ document.querySelector('#app').innerHTML = `
 
 const view = $('#view');
 const labels = { home: 'Your learning space', quizzes: 'Your quiz library', create: 'Quiz studio', revision: 'Automatic revision', search: 'Question bank search', reports: 'Performance analytics', ai: 'AI study studio', tools: 'File studio', settings: 'Preferences', mocks: 'Mock tests & section tests', notebook: 'Personal mistake notebook', achievements: 'Your achievements', analyser: 'Quizinox Analyser', predictor: 'Quizinox Predictor' };
-const MORE_TABS = ['create', 'ai', 'tools', 'settings', 'mocks', 'notebook', 'achievements', 'analyser', 'predictor'];
+Object.assign(labels, UPSC_LABELS);
+const MORE_TABS = [...UPSC_TABS, 'create', 'ai', 'tools', 'settings', 'mocks', 'notebook', 'achievements', 'analyser', 'predictor'];
 function markNav(tab) { $$('.navitem,.mobile-nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (b.hasAttribute('data-more') && MORE_TABS.includes(tab)))); }
 function scrollTop() { window.scrollTo(0, 0); $('.main')?.scrollTo?.(0, 0); }
 function setTab(tab) { if (play) return; db.activeTab = tab; save(); markNav(tab); $('#crumb').textContent = labels[tab] || 'QUIZINOX'; lastResult = null; render(); scrollTop(); }
@@ -147,6 +151,7 @@ $('[data-more]').addEventListener('click', () => { if (play) return toast('Finis
   { icon: '🏆', label: 'Achievements', hint: 'XP · streaks · badges · personal bests', run: () => setTab('achievements') },
   { icon: '🧠', label: 'Quizinox Analyser', hint: 'AI teacher that knows your history', cls: 'practice-icon', run: () => setTab('analyser') },
   { icon: '🎯', label: 'Quizinox Predictor', hint: 'Exam readiness score & range', run: () => setTab('predictor') },
+  { icon: '🏛', label: 'UPSC Preparation Centre', hint: 'Syllabus · Memorisation · Flashcards · Planner · Current Affairs · Doubts', cls: 'practice-icon', run: () => actionSheet('UPSC Preparation Centre', '', UPSC_NAV.map(([k, i, l]) => ({ icon: i, label: l, hint: UPSC_LABELS[k], run: () => setTab(k) }))) },
   { icon: '⚙', label: 'Settings', hint: 'Profile, AI keys, languages, data', cls: 'practice-icon', run: () => setTab('settings') },
 ]); });
 $$('[data-tab]').forEach(b => b.addEventListener('click', () => { if (play) return toast('Finish or exit the quiz first'); setTab(b.dataset.tab); }));
@@ -160,7 +165,7 @@ window.addEventListener('online', () => { updateNet(); toast('Back online — AI
 window.addEventListener('offline', () => { updateNet(); toast('Offline — your quizzes keep working'); });
 updateNet();
 
-function render() { if (play) { renderPlayer(); return; } const tab = db.activeTab || 'home'; markNav(tab); ({ home, quizzes: library, create: () => creator(), revision: revisionPage, search: searchPage, reports, ai: aiStudio, tools, settings, mocks: () => lazyPage('mocks'), notebook: () => lazyPage('notebook'), achievements: () => lazyPage('achievements'), analyser: () => lazyPage('analyser'), predictor: () => lazyPage('predictor') }[tab] || home)(); }
+function render() { if (play) { renderPlayer(); return; } const tab = db.activeTab || 'home'; markNav(tab); ({ home, quizzes: library, create: () => creator(), revision: revisionPage, search: searchPage, reports, ai: aiStudio, tools, settings, mocks: () => lazyPage('mocks'), notebook: () => lazyPage('notebook'), achievements: () => lazyPage('achievements'), analyser: () => lazyPage('analyser'), predictor: () => lazyPage('predictor'), ...Object.fromEntries(UPSC_TABS.map(k => [k, () => upscPage(k)])) }[tab] || home)(); }
 
 /* ------------------------------ HOME ------------------------------ */
 function home() {
@@ -170,6 +175,7 @@ function home() {
  ${saved && (saved.quiz?.isRevision || db.quizzes.some(q => q.id === saved.quiz?.id)) ? `<div class="resume-bar"><span>⏸ Unfinished attempt: <b>${esc(saved.quiz.title)}</b> · ${Object.keys(saved.answers || {}).length}/${saved.questions.length} answered · continue at Q${(saved.index || 0) + 1}${saved.lastAnswered != null ? ` (last answered Q${saved.lastAnswered + 1})` : ''}</span><div><button class="secondary" id="discardResume">Discard</button><button class="primary" id="resumeQuiz">Resume →</button></div></div>` : ''}
  ${(() => { const n = dueItems().length; return n ? `<div class="resume-bar revise-bar"><span>↻ <b>${n} question${n > 1 ? 's' : ''}</b> due for revision today (1 → 3 → 7 → 15 day cycle)</span><div><button class="primary" id="homeRevise">Revise now →</button></div></div>` : ''; })()}
  <div class="hero"><div class="hero-copy"><div class="eyebrow">✦ YOUR PERSONAL QUIZ COMMAND CENTRE</div><h1>Learn smarter.<br><span>Score higher.</span></h1><p>Create powerful tests, practise anywhere and track your progress — with or without internet.</p><div class="hero-actions"><button class="primary" id="heroCreate">＋ Create a quiz</button><button class="ghost light" id="heroImport">⇧ Import questions</button></div></div><div class="hero-art"><div class="orbit orbit1"></div><div class="orbit orbit2"></div><img class="hero-logo" src="${iconUrl}" alt=""/><div class="float-card fc1">⚡ <b>Focus mode</b></div><div class="float-card fc2">✓ <b>Offline ready</b></div><div class="hero-stat"><strong>${db.quizzes.length}</strong><small>QUIZZES SAVED</small></div></div></div>
+ ${upscHomeHtml(db, esc)}
  <div class="section-head"><div><div class="eyebrow">AT A GLANCE</div><h2>Your dashboard</h2></div><span class="muted">Stored securely on this phone</span></div>
  <div class="stats-grid"><div class="stat-card"><div class="stat-icon purple">▤</div><small>MY QUIZZES</small><strong>${db.quizzes.length}</strong><span>${totalQ} questions ready</span></div><div class="stat-card"><div class="stat-icon blue">◷</div><small>ATTEMPTS</small><strong>${db.attempts.length}</strong><span>Practice sessions</span></div><div class="stat-card"><div class="stat-icon green">↗</div><small>AVERAGE SCORE</small><strong>${avg}%</strong><span>Across all attempts</span></div><div class="stat-card"><div class="stat-icon amber">↻</div><small>IN REVISION</small><strong>${Object.keys(db.revision).length}</strong><span>${dueItems().length} due now · ${db.revStats.mastered || 0} mastered</span></div></div>
  <div class="two-col"><div class="panel"><div class="panel-head"><div><h3>Recent quizzes</h3><p>Pick up where you left off</p></div><button class="textbtn" id="seeAll">View all →</button></div>${db.quizzes.length ? db.quizzes.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 4).map(quizRow).join('') : '<div class="empty-mini"><span>▤</span><b>No quizzes yet</b><small>Create your first quiz or import a file.</small></div>'}</div><div class="panel insight"><div class="panel-head"><div><h3>Quick actions</h3><p>Everything you need, one tap away</p></div><span class="spark">✦</span></div><button class="action-tile" id="actCreate"><span class="tileicon">＋</span><span><b>Build a quiz</b><small>Create questions manually</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actImport"><span class="tileicon bluebg">⇧</span><span><b>Import a file</b><small>TXT, JSON or PDF</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actPdf"><span class="tileicon amberbg">📄</span><span><b>Coaching PDF → TXT</b><small>SFG · Vajiram · VisionIAS · any PDF</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actReports"><span class="tileicon greenbg">▥</span><span><b>View performance</b><small>Accuracy, speed, subject & topic analysis</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actAi"><span class="tileicon">✦</span><span><b>AI Study Studio</b><small>Analyst · Ask AI tutor · question generator</small></span><span class="arrow">↗</span></button><button class="action-tile" id="actSearch"><span class="tileicon bluebg">⌕</span><span><b>Search question bank</b><small>Find any question by keyword</small></span><span class="arrow">↗</span></button></div></div>
@@ -178,6 +184,7 @@ function home() {
   $('#resumeQuiz')?.addEventListener('click', resumeQuiz); $('#discardResume')?.addEventListener('click', () => { Store.removeItem(PLAY_STORE); home(); });
   $('#homeRevise')?.addEventListener('click', () => startRevision('due')); $('#actAi').onclick = () => setTab('ai'); $('#actSearch').onclick = () => setTab('search');
   wireQuizRows();
+  $$('[data-tab]', view).forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 }
 function quizRow(q) { return `<div class="quiz-row" data-open="${q.id}"><div class="quiz-symbol">▤</div><div class="quiz-info"><b>${esc(q.title)}</b><small>${q.questions.length} questions · ${esc(q.subject || 'General')}</small></div><span class="tag">${q.questions.length ? 'READY' : 'DRAFT'}</span><button class="more" data-menu="${q.id}" aria-label="More">···</button></div>`; }
 function wireQuizRows() { $$('[data-open]').forEach(x => x.onclick = () => quizMenu(x.dataset.open)); $$('[data-menu]').forEach(b => b.onclick = e => { e.stopPropagation(); quizMenu(b.dataset.menu); }); }
@@ -662,6 +669,12 @@ async function extractNotes(q) {
 /* ------------------------------ v2.9 · LAZY FEATURE PAGES ------------------------------ */
 // Mock builder, Achievements, Notebook, Analyser and Predictor live in their own file that is
 // downloaded only when opened — startup stays as fast as before.
+let upscP = null; const loadUpsc = () => upscP ||= import('./upsc/index.js');
+const upscCtx = () => ({ ...extrasCtx(), aiGenerator, startRevision, addRevisionItem, snapFromQuestion, qKey, dueItems });
+function upscPage(name) {
+  view.innerHTML = '<div class="empty-state"><div>⏳</div><h3>Loading…</h3></div>';
+  loadUpsc().then(m => { if (db.activeTab === name && !play) return m.pages[name](upscCtx()); }).catch(e => { console.error(e); upscP = null; view.innerHTML = `<div class="empty-state"><div>⚠</div><h3>Could not load this page</h3><p>${esc(e.message)}</p></div>`; });
+}
 let extrasP = null; const loadExtras = () => extrasP ||= import('./extras.js');
 const extrasCtx = () => ({
   get db() { return db; }, view, save, $, $$, esc, escMl, md, toast, modal, confirmBox, actionSheet, setTab, chooseMode, question, quizTemplate, uid, shuffle, AI, gemini,
@@ -828,7 +841,7 @@ async function restoreBackup(file) {
     const b = JSON.parse(await file.text()); const d = b.data || b;
     if (!Array.isArray(d.quizzes) || !Array.isArray(d.attempts)) throw Error('Not a QUIZINOX backup file');
     actionSheet('Restore backup', `${d.quizzes.length} quizzes · ${d.attempts.length} attempts`, [
-      { icon: '⊕', label: 'Merge with current data', hint: 'Keeps your current quizzes, adds missing ones', cls: 'practice-icon', run: () => { const qIds = new Set(db.quizzes.map(q => q.id)), aIds = new Set(db.attempts.map(a => a.id)); db.quizzes.push(...d.quizzes.filter(q => !qIds.has(q.id))); db.attempts.push(...d.attempts.filter(a => !aIds.has(a.id))); db.revision = { ...(d.revision || {}), ...db.revision }; db.bookmarks = { ...(d.bookmarks || {}), ...db.bookmarks }; db.attempts.sort((x, y) => String(y.date).localeCompare(String(x.date))); save(); setTab('home'); toast('Backup merged ✓'); } },
+      { icon: '⊕', label: 'Merge with current data', hint: 'Keeps your current quizzes, adds missing ones', cls: 'practice-icon', run: () => { const qIds = new Set(db.quizzes.map(q => q.id)), aIds = new Set(db.attempts.map(a => a.id)); db.quizzes.push(...d.quizzes.filter(q => !qIds.has(q.id))); db.attempts.push(...d.attempts.filter(a => !aIds.has(a.id))); db.revision = { ...(d.revision || {}), ...db.revision }; db.bookmarks = { ...(d.bookmarks || {}), ...db.bookmarks }; if (d.upsc) db.upsc = mergeUpsc(db.upsc, d.upsc); db.attempts.sort((x, y) => String(y.date).localeCompare(String(x.date))); save(); setTab('home'); toast('Backup merged ✓'); } },
       { icon: '↺', label: 'Replace everything', hint: 'Current data on this device is replaced', danger: true, cls: 'danger-icon', run: () => { const keys = db.settings.aiKeys || []; db = normalizeState({ ...d, settings: { ...(d.settings || {}), geminiKey: '', aiKeys: keys } }); save(); $('#profileName').textContent = db.settings.name || 'Learner'; setTab('home'); toast('Backup restored ✓'); } },
     ]);
   } catch (e) { toast('Backup invalid: ' + e.message); }
