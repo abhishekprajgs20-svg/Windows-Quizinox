@@ -388,11 +388,36 @@ function send(provider, key, model, prompt, o) {
 }
 
 /* ---------------- route planning ---------------- */
+
+/* ---- v3.2: multi-AI rotation helpers ---- */
+export const multiOn = () => S().aiMulti === true;
+/** Providers the user ticked for rotation that currently have at least one usable key. */
+export function multiProviders() {
+  if (S().aiMulti !== true) return [];
+  return (S().aiMultiProviders || []).filter(p => PROVIDERS[p] && providerEnabled(p) && keysOf(p).filter(usable).length);
+}
+let rrTick = 0;
+/** Orders providers by how lightly their keys have been used (average requests per ready key); ties alternate. */
+function rankByLoad(list, preferModel) {
+  rrTick++;
+  const load = p => { const m = selectedModel(p); const ready = keysOf(p).filter(usable).map(k => keyAvailability(k, m)).filter(a => a.ok); if (!ready.length) return Infinity; return ready.reduce((n, a) => n + a.used, 0) / ready.length; };
+  return list.map((p, i) => ({ p, l: load(p), t: (i + rrTick) % list.length })).sort((a, b) => (a.l === b.l ? a.t - b.t : a.l - b.l)).map(x => x.p);
+}
 function keyCandidates(provider) { if (provider === 'web') return [{ id: 'web', label: 'Web chat', key: 'web', provider: 'web' }]; return provider === 'puter' ? [{ id: 'puter', label: 'Puter login', key: 'puter', provider: 'puter' }] : keysOf(provider).filter(usable); }
 function buildRoutes(preferModel) {
   const s = S(); const mode = s.aiMode || 'auto'; const src = aiSource(); const routes = []; const seen = new Set();
   const add = (provider, model) => { const id = provider + '|' + model; if (!seen.has(id) && routes.length < MAX_ROUTES) { seen.add(id); routes.push({ provider, model }); } };
   const addApi = () => {
+    // v3.2 multi-AI rotation: several providers share the load. Each request starts on the selected provider whose keys have been used
+    // least so far (so Gemini and Groq keys alternate); the answer still comes from ONE AI, and if it fails the next selected AI takes over.
+    const multi = multiProviders();
+    if (multi.length >= 2) {
+      const ranked = rankByLoad(multi, preferModel);
+      ranked.forEach((p, i) => { const first = (i === 0 && preferModel && p === ranked[0]) ? preferModel : selectedModel(p); if (first) add(p, first); });
+      if (s.aiAutoFallback !== false) ranked.forEach(p => PROVIDERS[p].chain.forEach(mm => add(p, mm)));
+      if (s.aiCross !== false) [primaryProvider(), ...providerOrder()].filter((p, i, a) => a.indexOf(p) === i).filter(p => !multi.includes(p) && providerEnabled(p) && keyCandidates(p).length).forEach(p => { const f = selectedModel(p); if (f) add(p, f); if (s.aiAutoFallback !== false) PROVIDERS[p].chain.forEach(mm => add(p, mm)); });
+      return;
+    }
     const order = [primaryProvider(), ...providerOrder()].filter((p, i, a) => a.indexOf(p) === i).filter(p => providerEnabled(p) && keyCandidates(p).length);
     const list = s.aiCross === false ? order.slice(0, 1) : order;
     list.forEach((p, i) => {
@@ -589,3 +614,33 @@ export async function aiCall(prompt, opts = {}) {
   try { aiLogger && aiLogger(prompt, r, opts); } catch { /* logging must never break an AI call */ }
   return r;
 }
+
+/* v3.2 — speech to text for voice input (works in Android WebView + Electron where the browser speech API is missing).
+   Uses the keys already configured in Settings: Gemini (audio understanding) first, then Groq Whisper. */
+const blobB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('Could not read the recording')); r.readAsDataURL(blob); });
+export function canTranscribe() { return keysOf('gemini').length > 0 || keysOf('groq').length > 0; }
+export async function aiTranscribe(blob, { lang = 'English', signal } = {}) {
+  if (!blob || blob.size < 800) throw new AIError('The recording was too short — hold on a little longer and speak clearly.', 'short');
+  const mime = (blob.type || 'audio/webm').split(';')[0]; let lastErr = null;
+  const gem = keysOf('gemini'); const sel = safeSel('gemini'); const models = [...new Set([sel && !/^gemma/i.test(sel) ? sel : null, 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(Boolean))];
+  if (gem.length) {
+    const data = await blobB64(blob);
+    for (const k of gem) for (const model of models) {
+      try {
+        const payload = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: mime, data } }, { text: `Transcribe this speech exactly as spoken (${lang}). Output ONLY the transcript text, no commentary. If Hindi is spoken, write it in Devanagari unless the speaker clearly mixes English words.` }] }], generationConfig: { temperature: 0, maxOutputTokens: 1500 } };
+        const { res, body } = await fetchJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': k.key }, body: JSON.stringify(payload) }, signal);
+        if (res.ok) { const t = (body?.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim(); if (t) return t; lastErr = new AIError('No speech was detected in the recording.', 'empty'); break; }
+        lastErr = new AIError(errMessage(body, `Error ${res.status}`), 'http'); if (res.status === 429 || res.status === 400) break;
+      } catch (e) { if (e.code === 'abort') throw e; lastErr = e; }
+    }
+  }
+  for (const k of keysOf('groq')) {
+    try {
+      const fd = new FormData(); fd.append('file', blob, 'speech.' + (mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm')); fd.append('model', 'whisper-large-v3-turbo'); fd.append('response_format', 'json'); if (/hindi/i.test(lang)) fd.append('language', 'hi');
+      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${k.key}` }, body: fd, signal }); const body = await res.json().catch(() => null);
+      if (res.ok && body?.text?.trim()) return body.text.trim(); lastErr = new AIError(errMessage(body, `Error ${res.status}`), 'http');
+    } catch (e) { if (e.code === 'abort' || e.name === 'AbortError') throw new AIError('Cancelled', 'abort'); lastErr = e; }
+  }
+  throw lastErr || new AIError('Voice typing needs a Gemini or Groq API key (Settings → AI). Your keys are used only for the transcription.', 'nokey');
+}
+function safeSel(p) { try { return selectedModel(p); } catch { return ''; } }
